@@ -31,3 +31,6 @@ coverage/
 # Local editor/tool state
 .idea/
 .vscode/
+
+# Local Helix runtime state
+.helix/
