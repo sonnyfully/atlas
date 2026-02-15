@@ -1,0 +1,28 @@
+{
+  "name": "atlas",
+  "private": true,
+  "scripts": {
+    "dev:web": "pnpm --filter @atlas/web dev",
+    "build:web": "pnpm --filter @atlas/web build",
+    "smoke-test": "tsx scripts/smoke_test.ts",
+    "seed": "tsx scripts/seed_db.ts",
+    "backfill:audio": "tsx scripts/backfill_audio_embeddings.ts",
+    "test:upload": "bash scripts/test_upload.sh",
+    "compute:similarities": "tsx scripts/compute_similarities.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "helix-ts": "^1.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "unrs-resolver"
+    ]
+  }
+}

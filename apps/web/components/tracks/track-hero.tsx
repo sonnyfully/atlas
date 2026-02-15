@@ -1,0 +1,114 @@
+"use client";
+
+import { Play, Pause, Share2, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Waveform } from "@/components/tracks/waveform";
+import { LikeButton } from "@/components/tracks/like-button";
+import { usePlayer } from "@/lib/player-context";
+import { formatDuration, cn, trackCoverColor } from "@/lib/utils";
+import type { Track } from "@atlas/shared";
+
+interface TrackHeroProps {
+  track: Track;
+}
+
+export function TrackHero({ track }: TrackHeroProps) {
+  const { currentTrack, isPlaying, progress, togglePlay, seek, error } = usePlayer();
+  const isActive = currentTrack?.id === track.id;
+  const isThisPlaying = isActive && isPlaying;
+  const isProcessing =
+    track.status === "PENDING" || track.status === "PROCESSING";
+
+  return (
+    <section className="space-y-6">
+      {/* Header row */}
+      <div className="flex gap-6">
+        {/* Cover */}
+        <div
+          className="h-48 w-48 shrink-0 rounded-md shadow-md flex items-center justify-center"
+          style={{ backgroundColor: trackCoverColor(track.id) }}
+        >
+          {isProcessing && (
+            <Loader2 className="h-8 w-8 animate-spin text-white/60" />
+          )}
+        </div>
+
+        {/* Info */}
+        <div className="flex min-w-0 flex-1 flex-col justify-between py-1">
+          <div>
+            <h1 className="text-h1 truncate">{track.title}</h1>
+            <p className="mt-1 text-h4 text-muted-foreground font-normal">
+              {track.artist}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {track.status === "READY" && track.key && (
+                <Badge variant="secondary">{track.key}</Badge>
+              )}
+              {track.status === "READY" && track.bpm > 0 && (
+                <Badge variant="secondary">
+                  {Math.round(track.bpm)} BPM
+                </Badge>
+              )}
+              {isProcessing && (
+                <Badge variant="outline">Analyzing...</Badge>
+              )}
+              {track.status === "ERROR" && (
+                <Badge variant="destructive">Error</Badge>
+              )}
+              {error && isActive && (
+                <Badge variant="destructive">Playback unavailable</Badge>
+              )}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3">
+            <Button
+              className="h-11 w-11 rounded-full"
+              size="icon"
+              aria-label={isThisPlaying ? "Pause track" : "Play track"}
+              onClick={() => togglePlay(track)}
+              disabled={isProcessing}
+            >
+              {isThisPlaying ? (
+                <Pause className="h-5 w-5" />
+              ) : (
+                <Play className="h-5 w-5 ml-0.5" />
+              )}
+            </Button>
+            <LikeButton ariaLabel={track.title || "track"} />
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Share track"
+              className="h-11 w-11 text-muted-foreground"
+            >
+              <Share2 className="h-4 w-4" />
+            </Button>
+            <span className="ml-auto text-body-sm font-mono text-muted-foreground tabular-nums">
+              {track.duration_sec > 0
+                ? formatDuration(Math.round(track.duration_sec))
+                : "--:--"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Full-width waveform */}
+      {!isProcessing && (
+        <Waveform
+          trackId={track.id}
+          progress={isActive ? progress : 0}
+          barCount={120}
+          height={64}
+          onSeek={(pos) => {
+            if (!isActive) togglePlay(track);
+            seek(pos);
+          }}
+          className={cn(!isActive && "opacity-70")}
+        />
+      )}
+    </section>
+  );
+}

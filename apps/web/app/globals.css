@@ -1,0 +1,117 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* --- Core surfaces --- */
+    --background: 0 0% 100%;
+    --foreground: 0 0% 7%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 7%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 7%;
+
+    /* --- Muted / secondary --- */
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 15%;
+
+    /* --- Accent (signature orange) --- */
+    --primary: 18 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 0 0% 96%;
+    --accent-foreground: 0 0% 7%;
+
+    /* --- Borders & inputs --- */
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 18 100% 50%;
+
+    /* --- Semantic --- */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* --- Radius (shadcn base) --- */
+    --radius: 0.5rem;
+
+    /* --- Chart palette --- */
+    --chart-1: 18 100% 50%;
+    --chart-2: 220 70% 55%;
+    --chart-3: 142 72% 42%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 38 92% 50%;
+
+    /* --- Sidebar (shadcn sidebar component) --- */
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 0 0% 7%;
+    --sidebar-primary: 18 100% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 96%;
+    --sidebar-accent-foreground: 0 0% 7%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-ring: 18 100% 50%;
+  }
+
+  .dark {
+    /* --- Core surfaces (Spotify-inspired) --- */
+    --background: 0 0% 7%;           /* #121212 */
+    --foreground: 0 0% 98%;          /* #fafafa  */
+    --card: 0 0% 9%;                 /* #171717 */
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 12%;             /* #1e1e1e */
+    --popover-foreground: 0 0% 98%;
+
+    /* --- Muted / secondary --- */
+    --muted: 0 0% 15%;              /* #262626 */
+    --muted-foreground: 0 0% 64%;   /* #a3a3a3 */
+    --secondary: 0 0% 15%;
+    --secondary-foreground: 0 0% 98%;
+
+    /* --- Accent (signature orange on dark) --- */
+    --primary: 18 100% 50%;         /* #ff5500 — unchanged */
+    --primary-foreground: 0 0% 100%;
+    --accent: 0 0% 12%;             /* #1e1e1e  */
+    --accent-foreground: 0 0% 98%;
+
+    /* --- Borders & inputs --- */
+    --border: 0 0% 16%;             /* #282828  */
+    --input: 0 0% 20%;              /* #333333  */
+    --ring: 18 100% 50%;
+
+    /* --- Semantic --- */
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* --- Chart palette (brighter for dark bg) --- */
+    --chart-1: 18 100% 55%;
+    --chart-2: 220 80% 65%;
+    --chart-3: 142 72% 50%;
+    --chart-4: 280 70% 68%;
+    --chart-5: 38 95% 55%;
+
+    /* --- Sidebar --- */
+    --sidebar: 0 0% 5%;             /* #0d0d0d — slightly darker than bg */
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 18 100% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 12%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 0 0% 16%;
+    --sidebar-ring: 18 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
