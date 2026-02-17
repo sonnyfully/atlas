@@ -1,8 +1,9 @@
 "use client";
 
 import { Pause, Play } from "lucide-react";
+import { CoverArt } from "@/components/tracks/cover-art";
 import { usePlayer } from "@/lib/player-context";
-import { cn, formatDuration, trackCoverColor } from "@/lib/utils";
+import { cn, formatDuration } from "@/lib/utils";
 import type { Track } from "@atlas/shared";
 
 interface RightRailProps {
@@ -31,9 +32,10 @@ export function RightRail(_: RightRailProps) {
               className="flex w-full items-center gap-2 rounded-md p-1 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() => togglePlay(currentTrack)}
             >
-              <div
+              <CoverArt
+                trackId={currentTrack.id}
+                size={32}
                 className="h-8 w-8 shrink-0 rounded-sm"
-                style={{ backgroundColor: trackCoverColor(currentTrack.id) }}
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-body-sm font-medium text-primary" title={currentTrack.title}>
@@ -72,10 +74,7 @@ export function RightRail(_: RightRailProps) {
               )}
               onClick={() => togglePlay(track)}
             >
-              <div
-                className="h-8 w-8 shrink-0 rounded-sm"
-                style={{ backgroundColor: trackCoverColor(track.id) }}
-              />
+              <CoverArt trackId={track.id} size={32} className="h-8 w-8 shrink-0 rounded-sm" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-caption font-medium text-foreground" title={track.title}>
                   {track.title}

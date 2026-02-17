@@ -1,84 +1,103 @@
 # State
 
-Last verified: 2026-02-15
+Last verified: 2026-02-17
 
 ## Truth Snapshot
 
 ### Working
-- Upload ingestion: `POST /api/ingest` validates MIME/extension/size, deduplicates by SHA-256, stores file on disk, creates `Track` node, triggers analysis.
+- Upload ingestion: `POST /api/ingest` validates MIME/extension/size, deduplicates by SHA-256, stores file on disk, creates `Track`, and starts async analysis.
+- Ingest now hard-checks Helix availability and returns actionable `503` errors when Helix is down instead of generic `500`.
 - Track browse/read APIs:
-  - `GET /api/tracks` (default recent list, or paginated/sorted via `sort|offset|limit`)
+  - `GET /api/tracks`
   - `GET /api/tracks/[id]`
   - `GET /api/tracks/search?q=...&limit=...`
-- Audio playback API: `GET /api/audio/[id]` serves full or range-based stream for `READY` tracks.
-- Analysis pipeline (`apps/web/lib/analyze.ts`): metadata extraction + text embedding + audio embedding (best effort) + similarity edge writes + status transitions.
-- Helix persistence paths in use:
-  - named queries: `AddTrack`, `GetTrack`, `UpdateTrackAnalysis`, `UpdateTrackError`, `AddTrackEmbedding`, `AddAudioEmbedding`, `FindNeighbors`, `FindAudioNeighbors`, `AddSimilarEdge`, `GetSimilarTracks`
-  - MCP traversal endpoints used for list/search/filter/sort flows.
-- Frontend pages are wired to real data: `/`, `/upload`, `/tracks`, `/track/[id]`.
-- Client polling for async completion: `TrackStatusPoller` refreshes track page every 2s until terminal state.
+- Deterministic cover art API: `GET /api/cover/blobtoon/[trackId].svg?v=1&s=<size>` returns seeded SVG covers with immutable caching + ETag/304 support.
+- Audio playback API: `GET /api/audio/[id]` serves full/range streams for `READY` tracks.
+- Analysis pipeline (`apps/web/lib/analyze.ts`) runs metadata extraction + audio embedding and finishes with `READY/ERROR`.
+- Similar retrieval contract is now edge-enriched:
+  - `GET /api/tracks/[id]/similar` returns `{ source_id, results: [{ track, score, basis, model_version, updated_at }] }`.
+- Sound map is implemented:
+  - `GET /api/map/atlas` returns map graph payload (`nodes`, `edges`, `scenes`, `meta`).
+  - `POST /api/map/rebuild` forces a rebuild.
+  - `/map` renders interactive graph UI (filters, pan/zoom, gradient edges, click pin card, double-click navigation).
+- Atlas rebuild lifecycle exists:
+  - Debounced `scheduleAtlasRebuild()` triggers after successful analysis.
+  - Snapshot persistence at `data/atlas/latest.json`.
+- Frontend pages using real data: `/`, `/upload`, `/tracks`, `/track/[id]`, `/map`.
+- Cover rendering in track list rows, track hero, mini player, right rail, and compact track widgets now uses Blobtoon URL covers with deterministic fallback placeholders.
+- Client polling for async completion remains active (`TrackStatusPoller`, 2s).
 
 ### Partial
-- Similarity retrieval endpoint (`GET /api/tracks/[id]/similar`) returns only track nodes; edge metadata (`score`, `basis`, `model_version`) is stored but not returned.
-- Audio-embedding coverage depends on file format support in Node CLAP path (WAV decode implemented). When audio embedding fails, text-only similarity still proceeds.
-- Error handling in Helix read helpers often returns empty/null fallbacks, which keeps UI stable but obscures outage details.
+- Similarity edge persistence in Helix (`AddSimilarEdge`) is still unreliable in this environment (`Graph error: Unsupported value type`); retrieval currently uses deterministic audio-feature scoring from READY tracks.
+- `Scene`/`IN_SCENE` schema was expanded for map metadata, but current map rendering uses computed scenes from atlas build output rather than persisted scene graph writes.
+- Audio-embedding generation still depends on WAV decode support in Node CLAP path; non-WAV can still reduce similarity quality until decode coverage is expanded.
 
 ### Stubbed
-- Map/scene product surface:
-  - `/map` route is a placeholder message.
-  - `apps/web/components/map/sound-map.tsx` and `apps/web/components/map/scene-sheet.tsx` return `null`.
-  - `Scene` and `IN_SCENE` schema exist but are not used by app routes.
+- None on primary user-facing map/similarity surfaces.
 
 ### Broken
-- None verified as hard-broken in source.
-- Caveat: analysis is fire-and-forget in the web process; if the process dies, in-flight analysis is lost (operational reliability gap, not compile-time breakage).
+- No hard compile/runtime breakages verified in source for core flows.
+- Operational caveat remains: analysis and rebuild scheduling run in-process; process restart loses in-flight work.
 
 ## Invariants And Verification
 
 ### Invariants
-- `Track.status` lifecycle is `PENDING -> PROCESSING -> READY` or `ERROR`.
-- Duplicate upload detection is based on `Track.file_hash` SHA-256 of file bytes.
-- `GET /api/audio/[id]` must reject non-READY tracks (`422`) and missing files (`404`).
-- Playback queue only includes `READY` tracks (`TrackList` filters before calling `setQueue`).
-- Similarity edges are directed `SIMILAR_TO` from analyzed track to neighbors.
+- `Track.status` lifecycle remains `PENDING -> PROCESSING -> READY` or `ERROR`.
+- Duplicate upload detection remains SHA-256 based (`Track.file_hash`).
+- Cover generation invariants:
+  - seed is derived server-side from `Track.file_hash` when present, else `trackId` hash.
+  - SVG payload is deterministic for `(seed, version, size)`.
+  - no user strings are embedded in SVG markup.
+- `GET /api/audio/[id]` rejects non-READY tracks (`422`) and missing files (`404`).
+- Map availability gate:
+  - `READY tracks >= 3`
+  - `similar edges >= 2`
+- `/map` click model:
+  - single-click opens pin card
+  - double-click navigates `/track/[id]`
 
 ### Verify with commands
 ```bash
 bash scripts/init_db.sh
-pnpm seed
 pnpm smoke-test
 pnpm dev:web
-pnpm tsx scripts/test_search.ts
 bash scripts/test_upload.sh data/seed_audio/midnight_drive.wav
+curl -s http://localhost:3000/api/tracks/<id>/similar
+curl -s http://localhost:3000/api/map/atlas
 ```
 
 ### Verify manually
-- Open `http://localhost:3000/upload`, upload an audio file, then open `/track/<id>`.
-- Confirm status badge transitions from `Analyzing...` to `READY` (or `ERROR`).
-- Start playback and verify browser requests `/api/audio/<id>` and seek works.
-- Use home search input and confirm `/api/tracks/search` results render.
+- Upload MP3/WAV from `/upload`; confirm ingest succeeds and status transitions to `READY`.
+- Open `/track/<id>` and confirm Similar Tracks shows score/basis badges.
+- Open `/map` and verify:
+  - graph renders (not placeholder),
+  - filters adjust view,
+  - single-click opens floating pin card,
+  - double-click opens track page.
+- Stop Helix and hit `/api/map/atlas`; confirm structured unavailable response and UI unavailable state.
 
 ## Known Gaps / Tech Debt
-- No durable background queue; analysis runs in-process from API route call site.
-- Similarity read path drops edge scores/basis despite writing them.
-- `/map` and scene graph UX are not implemented even though scene schema exists.
-- `scripts/compute_similarities.ts` is text-only and diverges from hybrid analyze pipeline behavior.
-- Some scripts/docs still reflect older assumptions and should be treated as historical unless they match current routes/query usage.
+- No durable queue/worker for analysis or atlas rebuild jobs.
+- Helix edge write path for string-heavy `SIMILAR_TO` metadata currently unreliable; dynamic similarity scoring is used as runtime fallback.
+- Similarity model is currently deterministic audio-feature scoring (`v3-audio-only`) on read path, not persisted graph retrieval.
+- Text/hybrid similarity edges are removed from active runtime and scripts; audio is the only basis.
 
 ## Now / Next / Later
 
 ### Now (verified current reality)
 - Core ingest -> analyze -> browse -> playback loop is implemented and connected.
-- Hybrid similarity write path exists in analyze pipeline and seed/backfill scripts.
+- Similar retrieval endpoint returns ranked edge metadata.
+- Sound map is implemented with interactive UX and atlas API contracts.
 
 ### Next (clearly implied by current code/comments)
-- Implement real scene/map experience (commented placeholders in map components).
-- Decide and implement similarity API contract for edge metadata exposure.
-- Choose durable async execution model for analysis.
+- Stabilize Helix `SIMILAR_TO` write semantics and migrate map/similar reads to persisted audio graph edges.
+- Persist scene assignments (`Scene` + `IN_SCENE`) from atlas rebuild job.
+- Add durable background execution model for analysis + rebuild tasks.
 
 ### Later (proposed)
-- Consolidate or retire legacy text-only similarity tooling to avoid drift.
-- Tighten Helix error surfacing/observability instead of silent empty fallbacks.
+- Replace deterministic audio-feature scorer with validated audio-vector retrieval once edge persistence is stable.
+- Add scene adjacency/collision layers on top of current atlas graph.
+- Add observability around atlas build latency, failure reasons, and stale-snapshot age.
 
 ## Notes
-- No open-issues tracker or actionable source TODO/FIXME markers were found in this repo snapshot; Next/Later items above are inferred from placeholder comments and code-path mismatches.
+- This state reflects actual code/runtime behavior as of 2026-02-17, including dynamic fallback choices made to keep similarity and map UX functional while Helix edge writes are unstable.

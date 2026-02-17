@@ -3,15 +3,18 @@
 import Link from "next/link";
 import { Play, Pause, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { CoverArt } from "@/components/tracks/cover-art";
 import { usePlayer } from "@/lib/player-context";
-import { formatDuration, cn, trackCoverColor } from "@/lib/utils";
-import type { Track } from "@atlas/shared";
+import { formatDuration, cn } from "@/lib/utils";
+import type { SimilarTrackResult, Track } from "@atlas/shared";
 
 interface TrackRowCompactProps {
   track: Track;
+  similarity?: Pick<SimilarTrackResult, "score" | "basis">;
 }
 
-export function TrackRowCompact({ track }: TrackRowCompactProps) {
+export function TrackRowCompact({ track, similarity }: TrackRowCompactProps) {
   const { currentTrack, isPlaying, togglePlay } = usePlayer();
   const isActive = currentTrack?.id === track.id;
   const isThisPlaying = isActive && isPlaying;
@@ -45,10 +48,7 @@ export function TrackRowCompact({ track }: TrackRowCompactProps) {
           )}
         </Button>
       )}
-      <div
-        className="h-8 w-8 shrink-0 rounded-sm"
-        style={{ backgroundColor: trackCoverColor(track.id) }}
-      />
+      <CoverArt trackId={track.id} size={32} className="h-8 w-8 shrink-0 rounded-sm" />
       <div className="min-w-0 flex-1">
         <Link
           href={`/track/${track.id}`}
@@ -62,6 +62,16 @@ export function TrackRowCompact({ track }: TrackRowCompactProps) {
         <p className="truncate text-caption text-muted-foreground">
           {track.artist}
         </p>
+        {similarity && (
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <Badge variant="outline" className="h-5 px-1.5 py-0 text-[10px]">
+              {Math.round(similarity.score * 100)}%
+            </Badge>
+            <Badge variant="secondary" className="h-5 px-1.5 py-0 text-[10px] capitalize">
+              {similarity.basis}
+            </Badge>
+          </div>
+        )}
       </div>
       <span className="text-caption font-mono text-muted-foreground tabular-nums">
         {track.duration_sec > 0

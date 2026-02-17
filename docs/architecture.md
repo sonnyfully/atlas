@@ -1,108 +1,97 @@
 # Architecture
 
-Last verified: 2026-02-15
+Last verified: 2026-02-17
 
 ## Component Map
 - `/Users/sonnyfullerton/Projects/atlas/apps/web/app`
-  - App Router pages (`/`, `/upload`, `/tracks`, `/track/[id]`, `/map`)
-  - API routes under `app/api/*`
+  - App Router pages: `/`, `/upload`, `/tracks`, `/track/[id]`, `/map`
+  - API routes: `app/api/*` including map endpoints and deterministic Blobtoon covers (`/api/cover/blobtoon/[trackId].svg`)
 - `/Users/sonnyfullerton/Projects/atlas/apps/web/components`
-  - `tracks/*`: list rows, search, status polling, similar tracks, DNA panel
+  - `tracks/*`: list/hero/DNA/similar/status polling
   - `player/*`: sticky mini player
-  - `layout/*`: sidebar + right rail
-  - `map/*`: currently placeholder components
+  - `map/*`: interactive atlas graph, filters, pin card
 - `/Users/sonnyfullerton/Projects/atlas/apps/web/lib`
-  - `helix.ts`: HelixDB client helpers (named queries + MCP traversal wrappers)
-  - `analyze.ts`: async analysis/similarity pipeline
+  - `helix.ts`: Helix data helpers and similarity retrieval/scoring
+  - `analyze.ts`: async ingest analysis pipeline
+  - `atlas.ts`: atlas graph build/rebuild/snapshot scheduling
+  - `blobtoon.ts`: deterministic seeded SVG cover generator (PRNG, palette, shape composition, size clamping)
+  - `covers.ts`: cover URL helper for UI consumers
   - `player-context.tsx`: client audio/queue state
 - `/Users/sonnyfullerton/Projects/atlas/packages/shared`
-  - shared types (`Track`, `IngestResponse`) and `audioUrl()` helper
+  - shared DTOs (`Track`, similarity/map payload types)
   - embedding generation (`embeddings.ts`)
 - `/Users/sonnyfullerton/Projects/atlas/db`
-  - `schema.hx`: graph/vector schema
-  - `queries.hx`: named Helix queries used by app/scripts
+  - `schema.hx`, `queries.hx` (named Helix queries)
 - `/Users/sonnyfullerton/Projects/atlas/scripts`
-  - DB init, seed, smoke tests, upload/search tests, backfill tools
+  - init/seed/smoke/upload/backfill utilities
 
 ## Runtime Topology
 ```text
-[Next.js UI Pages]
-      |
-      v
-[Next.js API Routes] ----> [apps/web/lib/analyze.ts] (fire-and-forget async in same process)
-      |                              |
-      |                              v
-      +-----------------------> [HelixDB :6969]
-      |                          - Track nodes
-      |                          - Vector nodes
-      |                          - SIMILAR_TO edges
-      v
-[Local Disk data/uploads]
-      |
-      v
-[GET /api/audio/[id] stream -> HTMLAudioElement in PlayerContext]
+[Next.js UI]
+   |
+   v
+[Route Handlers + Server Components]
+   | \
+   |  \--> [apps/web/lib/atlas.ts]
+   |          - build atlas graph
+   |          - cache snapshot (data/atlas/latest.json)
+   |
+   +----> [apps/web/lib/analyze.ts] (fire-and-forget async)
+   |          - metadata + embeddings
+   |          - status transitions
+   |          - schedule atlas rebuild
+   |
+   +----> [HelixDB :6969]
+   |
+   +----> [Local disk data/uploads + data/atlas]
 ```
 
 ## Key Flows
 
-### 1) Ingest / Upload
-- UI (`/upload`) sends `multipart/form-data` with key `file` to `POST /api/ingest`.
-- API validates MIME type, extension, and max size (100MB).
-- API computes SHA-256 hash and checks duplicates via `findTrackByHash()`.
-- If duplicate: returns existing `{ id, status, duplicate: true }`.
-- If new: writes file to `data/uploads/<uuid>.<ext>`, creates `Track` node with `PENDING`, triggers `analyzeTrack(...)` without awaiting, returns `{ id, status: "PENDING", duplicate: false }`.
+### 1) Ingest
+- `/upload` posts multipart file to `POST /api/ingest`.
+- Ingest validates MIME/ext/size, checks duplicate hash, verifies Helix availability.
+- New files are written under `data/uploads`, `Track` node is created with `PENDING`, and analysis starts asynchronously.
 
 ### 2) Analyze
-- Triggered by ingest route in-process (no external queue).
-- `analyzeTrack()`:
-  - parses metadata using `music-metadata`
-  - derives `duration_sec`, `bpm`, `key`, `energy`
-  - writes `PROCESSING` + analysis fields via `UpdateTrackAnalysis`
-  - builds metadata text and generates text embedding (`all-MiniLM-L6-v2`)
-  - attempts CLAP audio embedding (`clap-htsat-unfused`); on failure, continues text-only
-  - finds neighbors (`FindNeighbors`, `FindAudioNeighbors`), merges rank-based scores (40% text / 60% audio), writes `SIMILAR_TO` edges with `score`, `basis`, `model_version`
-  - sets `READY` via `UpdateTrackAnalysis`
-- On failure: writes `ERROR` + message via `UpdateTrackError`.
+- `analyzeTrack()` parses metadata and writes `PROCESSING` analysis fields.
+- Generates audio embedding and audio-neighbor candidates.
+- Writes `READY` on success or `ERROR` on failure.
+- Schedules debounced atlas rebuild after successful completion.
 
-### 3) Retrieve / Similarity
-- Track detail page fetches `getTrack(id)` server-side.
-- If status is `PENDING`/`PROCESSING`, client `TrackStatusPoller` polls `GET /api/tracks/[id]` every 2s until `READY`/`ERROR`, then refreshes page.
-- Similar tracks panel calls `getSimilarTracks(id)` server-side.
-- API route `GET /api/tracks/[id]/similar` exposes same query for client integrations as `{ results: Track[] }`.
-- Player streams audio from `GET /api/audio/[id]` only when track is `READY`; supports byte ranges for seek/scrub.
+### 3) Similar Retrieval
+- `GET /api/tracks/[id]/similar` returns enriched ranked results:
+  - `{ source_id, results: [{ track, score, basis, model_version, updated_at }] }`
+- Similar ranking is served through the app data layer with deterministic audio-feature scoring on READY tracks (`v3-audio-only`) while persisted edge writes are unstable.
 
-## Data Contracts (UI-facing)
+### 4) Atlas Map
+- `GET /api/map/atlas` returns atlas payload (`nodes`, `edges`, `scenes`, `meta`).
+- `POST /api/map/rebuild` forces rebuild.
+- `/map` client renders:
+  - pan/zoom graph,
+  - gradient audio edges with opacity/width by score,
+  - tempo/view filters,
+  - single-click floating pin card,
+  - double-click navigation to `/track/[id]`.
 
-### `Track` (`packages/shared/index.ts`)
-- Required fields used by UI: `id`, `title`, `artist`, `status`, `duration_sec`, `bpm`, `key`, `energy`, `original_filename`, `filepath`, `upload_date`, `error`.
-- Status values: `"PENDING" | "PROCESSING" | "READY" | "ERROR"`.
+### 5) Blobtoon Covers
+- UI requests cover URLs through `getCoverUrl(trackId, { v, s })`.
+- `GET /api/cover/blobtoon/[trackId].svg`:
+  - normalizes route id (`.svg` suffix),
+  - derives deterministic seed from `Track.file_hash` fallback `trackId`,
+  - clamps requested size,
+  - emits SVG with immutable cache headers + `X-Content-Type-Options: nosniff`,
+  - computes stable ETag from `seed|version|size` and serves `304` when possible.
+- Cover fallbacks remain color placeholders in UI if image load fails.
 
-### Ingest response
-- `POST /api/ingest -> IngestResponse`
-- Shape: `{ id: string, status: TrackStatus, duplicate: boolean }`.
-
-### Search response
-- `GET /api/tracks/search?q=...&limit=...`
-- Shape: `{ results: Track[] }`.
-
-### Similar response
-- `GET /api/tracks/[id]/similar`
-- Shape: `{ results: Track[] }`.
-- Note: does not currently include similarity edge metadata despite DB storing it.
-
-### Audio response
-- `GET /api/audio/[id]`
-- `200` full stream or `206` ranged stream; `422` if track not ready; `404` if track/file missing.
-
-## Storage Model
-- File storage: local filesystem under `/Users/sonnyfullerton/Projects/atlas/data/uploads`.
-- Metadata + vectors + graph edges: HelixDB at `HELIX_URL` (`.env` default `http://localhost:6969`).
+## Contracts
+- Canonical DTOs live in `packages/shared/index.ts`.
+- API contract summaries live in `docs/interfaces.md`.
 
 ## Boundaries
-- DB writes happen from:
-  - `POST /api/ingest` (track creation)
-  - `apps/web/lib/analyze.ts` (analysis fields, embeddings, similarity edges)
-  - maintenance scripts in `/scripts` (seed/backfill/smoke)
-- UI components must not write directly to HelixDB.
-- Read helpers in `apps/web/lib/helix.ts` are the application boundary for data access.
-- `Track.status` gating is enforced before audio streaming and before queueing playable tracks.
+- UI does not write directly to Helix.
+- Write paths:
+  - ingest route (track creation),
+  - analyze pipeline (analysis + embeddings),
+  - scripts (seed/backfill/smoke).
+- Read orchestration for map/similar is centralized in `apps/web/lib/helix.ts` and `apps/web/lib/atlas.ts`.

@@ -12,8 +12,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Waveform } from "@/components/tracks/waveform";
 import { LikeButton } from "@/components/tracks/like-button";
+import { CoverArt } from "@/components/tracks/cover-art";
 import { usePlayer } from "@/lib/player-context";
-import { formatDuration, cn, trackCoverColor } from "@/lib/utils";
+import { formatDuration, cn } from "@/lib/utils";
 import type { Track } from "@atlas/shared";
 
 interface TrackRowProps {
@@ -110,11 +111,7 @@ export function TrackRow({ track, index }: TrackRowProps) {
         )}
       </div>
 
-      {/* Cover art placeholder */}
-      <div
-        className="h-10 w-10 shrink-0 rounded-sm"
-        style={{ backgroundColor: trackCoverColor(track.id) }}
-      />
+      <CoverArt trackId={track.id} size={40} className="h-10 w-10 shrink-0 rounded-sm" />
 
       {/* Title / Artist / BPM */}
       <div className="min-w-0 flex-1">

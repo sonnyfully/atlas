@@ -13,8 +13,9 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import { CoverArt } from "@/components/tracks/cover-art";
 import { usePlayer } from "@/lib/player-context";
-import { formatDuration, cn, trackCoverColor } from "@/lib/utils";
+import { formatDuration, cn } from "@/lib/utils";
 
 export function MiniPlayer() {
   const {
@@ -86,10 +87,7 @@ export function MiniPlayer() {
       {/* Track info */}
       <div className="hidden sm:flex items-center gap-3 min-w-0 w-48 shrink-0">
         <Link href={`/track/${currentTrack.id}`} className="shrink-0">
-          <div
-            className="h-10 w-10 rounded-sm"
-            style={{ backgroundColor: trackCoverColor(currentTrack.id) }}
-          />
+          <CoverArt trackId={currentTrack.id} size={40} className="h-10 w-10 rounded-sm" />
         </Link>
         <div className="min-w-0">
           <p

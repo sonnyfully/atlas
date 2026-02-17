@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Waveform } from "@/components/tracks/waveform";
 import { LikeButton } from "@/components/tracks/like-button";
+import { CoverArt } from "@/components/tracks/cover-art";
 import { usePlayer } from "@/lib/player-context";
-import { formatDuration, cn, trackCoverColor } from "@/lib/utils";
+import { formatDuration, cn } from "@/lib/utils";
 import type { Track } from "@atlas/shared";
 
 interface TrackHeroProps {
@@ -25,12 +26,17 @@ export function TrackHero({ track }: TrackHeroProps) {
       {/* Header row */}
       <div className="flex gap-6">
         {/* Cover */}
-        <div
-          className="h-48 w-48 shrink-0 rounded-md shadow-md flex items-center justify-center"
-          style={{ backgroundColor: trackCoverColor(track.id) }}
-        >
+        <div className="relative h-48 w-48 shrink-0">
+          <CoverArt
+            trackId={track.id}
+            size={192}
+            loading="eager"
+            className="h-full w-full rounded-md shadow-md"
+          />
           {isProcessing && (
-            <Loader2 className="h-8 w-8 animate-spin text-white/60" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-white/60" />
+            </div>
           )}
         </div>
 
