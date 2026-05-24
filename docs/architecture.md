@@ -1,97 +1,89 @@
 # Architecture
 
-Last verified: 2026-02-17
+Last verified: 2026-04-12
 
-## Component Map
-- `/Users/sonnyfullerton/Projects/atlas/apps/web/app`
-  - App Router pages: `/`, `/upload`, `/tracks`, `/track/[id]`, `/map`
-  - API routes: `app/api/*` including map endpoints and deterministic Blobtoon covers (`/api/cover/blobtoon/[trackId].svg`)
-- `/Users/sonnyfullerton/Projects/atlas/apps/web/components`
-  - `tracks/*`: list/hero/DNA/similar/status polling
-  - `player/*`: sticky mini player
-  - `map/*`: interactive atlas graph, filters, pin card
-- `/Users/sonnyfullerton/Projects/atlas/apps/web/lib`
-  - `helix.ts`: Helix data helpers and similarity retrieval/scoring
-  - `analyze.ts`: async ingest analysis pipeline
-  - `atlas.ts`: atlas graph build/rebuild/snapshot scheduling
-  - `blobtoon.ts`: deterministic seeded SVG cover generator (PRNG, palette, shape composition, size clamping)
-  - `covers.ts`: cover URL helper for UI consumers
-  - `player-context.tsx`: client audio/queue state
-- `/Users/sonnyfullerton/Projects/atlas/packages/shared`
-  - shared DTOs (`Track`, similarity/map payload types)
-  - embedding generation (`embeddings.ts`)
-- `/Users/sonnyfullerton/Projects/atlas/db`
-  - `schema.hx`, `queries.hx` (named Helix queries)
-- `/Users/sonnyfullerton/Projects/atlas/scripts`
-  - init/seed/smoke/upload/backfill utilities
+## Summary
+- Atlas is now organized around one presentation flow:
+  - upload a track
+  - analyze real audio into persisted track features and embeddings
+  - run the canonical build
+  - read back persisted similarity, scene membership, scene adjacency, and collisions
+  - present that graph truth through Track DNA, Scene pages, and the Atlas map
+- `Track DNA` is the hero surface.
+- `Scenes` and `Map` are supporting proof surfaces.
 
 ## Runtime Topology
 ```text
-[Next.js UI]
+[Next.js App Router]
    |
-   v
-[Route Handlers + Server Components]
-   | \
-   |  \--> [apps/web/lib/atlas.ts]
-   |          - build atlas graph
-   |          - cache snapshot (data/atlas/latest.json)
+   +--> /api/ingest
+   |      -> create Track
+   |      -> write file to data/uploads
+   |      -> kick off analyzeTrack()
    |
-   +----> [apps/web/lib/analyze.ts] (fire-and-forget async)
-   |          - metadata + embeddings
-   |          - status transitions
-   |          - schedule atlas rebuild
+   +--> analyzeTrack()
+   |      -> metadata + audio feature extraction
+   |      -> audio embedding generation
+   |      -> persisted track analysis update
+   |      -> schedule canonical rebuild + atlas snapshot refresh
    |
-   +----> [HelixDB :6969]
+   +--> rebuildCanonicalAtlasBuild()
+   |      -> persisted SIMILAR_TO
+   |      -> persisted IN_SCENE
+   |      -> persisted ADJACENT
+   |      -> persisted COLLIDES_WITH
    |
-   +----> [Local disk data/uploads + data/atlas]
+   +--> helix.ts read layer
+   |      -> Track DNA
+   |      -> similar tracks
+   |      -> collisions
+   |      -> scenes and scene members
+   |
+   +--> atlas-v1.ts
+          -> read active persisted build
+          -> build /api/atlas/map?v=1 payload
+          -> cache payload by world.version_hash
 ```
 
-## Key Flows
+## Product Surfaces
+- `/`
+  - atlas overview
+  - ready/analyzing/build summary
+  - quick links to upload, latest DNA, scenes, and map
+- `/upload`
+  - live ingest flow
+  - per-file lifecycle states from upload to ready DNA
+- `/track/[id]`
+  - canonical Track DNA narrative
+  - placement summary, scene home, nearby scenes, collisions, similar tracks
+- `/scenes` and `/scenes/[id]`
+  - persisted scene directory and detail proof pages
+- `/map`
+  - supporting atlas visualization using persisted scene graph data
 
-### 1) Ingest
-- `/upload` posts multipart file to `POST /api/ingest`.
-- Ingest validates MIME/ext/size, checks duplicate hash, verifies Helix availability.
-- New files are written under `data/uploads`, `Track` node is created with `PENDING`, and analysis starts asynchronously.
-
-### 2) Analyze
-- `analyzeTrack()` parses metadata and writes `PROCESSING` analysis fields.
-- Generates audio embedding and audio-neighbor candidates.
-- Writes `READY` on success or `ERROR` on failure.
-- Schedules debounced atlas rebuild after successful completion.
-
-### 3) Similar Retrieval
-- `GET /api/tracks/[id]/similar` returns enriched ranked results:
-  - `{ source_id, results: [{ track, score, basis, model_version, updated_at }] }`
-- Similar ranking is served through the app data layer with deterministic audio-feature scoring on READY tracks (`v3-audio-only`) while persisted edge writes are unstable.
-
-### 4) Atlas Map
-- `GET /api/map/atlas` returns atlas payload (`nodes`, `edges`, `scenes`, `meta`).
-- `POST /api/map/rebuild` forces rebuild.
-- `/map` client renders:
-  - pan/zoom graph,
-  - gradient audio edges with opacity/width by score,
-  - tempo/view filters,
-  - single-click floating pin card,
-  - double-click navigation to `/track/[id]`.
-
-### 5) Blobtoon Covers
-- UI requests cover URLs through `getCoverUrl(trackId, { v, s })`.
-- `GET /api/cover/blobtoon/[trackId].svg`:
-  - normalizes route id (`.svg` suffix),
-  - derives deterministic seed from `Track.file_hash` fallback `trackId`,
-  - clamps requested size,
-  - emits SVG with immutable cache headers + `X-Content-Type-Options: nosniff`,
-  - computes stable ETag from `seed|version|size` and serves `304` when possible.
-- Cover fallbacks remain color placeholders in UI if image load fails.
-
-## Contracts
-- Canonical DTOs live in `packages/shared/index.ts`.
-- API contract summaries live in `docs/interfaces.md`.
-
-## Boundaries
-- UI does not write directly to Helix.
+## Core Read/Write Boundaries
 - Write paths:
-  - ingest route (track creation),
-  - analyze pipeline (analysis + embeddings),
-  - scripts (seed/backfill/smoke).
-- Read orchestration for map/similar is centralized in `apps/web/lib/helix.ts` and `apps/web/lib/atlas.ts`.
+  - `POST /api/ingest`
+  - `apps/web/lib/analyze.ts`
+  - `apps/web/lib/canonical-build.ts`
+  - operator scripts under `scripts/`
+- Read paths:
+  - `apps/web/lib/helix.ts` for Track/Scene/DNA truth
+  - `apps/web/lib/atlas-v1.ts` for map payload generation
+- Important rule:
+  - product read routes should not rely on hidden rebuild side effects during normal product usage
+
+## Presentation Commands
+- `pnpm atlas:prep`
+  - canonical operator prep command
+  - ingest seed audio, wait for analysis, run canonical rebuild, refresh atlas outputs, print suggested URLs
+- `pnpm atlas:smoke`
+  - canonical presenter smoke command
+  - verifies DNA, similar, collisions, scenes, and map routes on a running app
+- `GET /api/atlas/map?v=1&rebuild=1`
+  - manual HTTP fallback for rebuilds
+  - keep as a backup path, not the primary operator flow
+
+## Remaining Debt
+- Analysis and rebuild jobs are still in-process rather than durable worker jobs
+- Search remains intentionally narrow and track-first for the current product scope

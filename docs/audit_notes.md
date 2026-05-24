@@ -1,23 +1,67 @@
 # Audit Notes
-- Audit date: 2026-02-15
-- Scope: verified code paths in `/Users/sonnyfullerton/Projects/atlas/apps/web`, `/Users/sonnyfullerton/Projects/atlas/packages/shared`, `/Users/sonnyfullerton/Projects/atlas/db`, `/Users/sonnyfullerton/Projects/atlas/scripts`.
+
+- Audit date: 2026-04-05
+- Scope: verified code paths in `/Users/sonnyfullerton/Projects/atlas/apps/web`, `/Users/sonnyfullerton/Projects/atlas/packages/shared`, `/Users/sonnyfullerton/Projects/atlas/db`, `/Users/sonnyfullerton/Projects/atlas/scripts`
+- Status: current evaluation snapshot
 
 ## Verified findings
-- Frontend routes implemented: `/`, `/upload`, `/tracks`, `/track/[id]`, `/map`.
-- API routes implemented: `POST /api/ingest`, `GET /api/tracks`, `GET /api/tracks/[id]`, `GET /api/tracks/[id]/similar`, `GET /api/tracks/search`, `GET /api/audio/[id]`.
-- Upload flow is real and idempotent by SHA-256 file hash (`findTrackByHash`) before writing `data/uploads`.
-- Audio files are stored on local disk at `data/uploads` (resolved from `apps/web/app/api/ingest/route.ts`).
-- Analysis is triggered in-process from ingest (`analyzeTrack(...)`) and not queued/durable.
-- Analysis pipeline is real: metadata parse (`music-metadata`), feature extraction heuristics (BPM/key/energy), text embeddings (`Xenova/all-MiniLM-L6-v2`), audio embeddings (`Xenova/clap-htsat-unfused`), and `SIMILAR_TO` edge writes.
-- Helix schema actively used: `Track`, `Track_Vector`, `Audio_Vector`, `HAS_EMBEDDING`, `HAS_AUDIO_EMBEDDING`, `SIMILAR_TO`.
-- Similarity retrieval endpoint currently returns track nodes only (`{ results: Track[] }`) without edge `score/basis/model_version`.
-- UI polling behavior exists: track detail page polls `/api/tracks/[id]` every 2s until status is `READY` or `ERROR`.
-- Playback uses real browser audio streaming through `/api/audio/[id]` with HTTP range support.
-- `/map` page and map components are placeholders; scene schema exists but scene UX is not implemented.
-- There are no actionable TODO/FIXME markers in source code outside docs.
+- Frontend routes implemented:
+  - `/`
+  - `/upload`
+  - `/tracks`
+  - `/track/[id]`
+  - `/map`
+- API routes implemented:
+  - `POST /api/ingest`
+  - `GET /api/tracks`
+  - `GET /api/tracks/[id]`
+  - `GET /api/tracks/[id]/similar`
+  - `GET /api/tracks/[id]/collisions`
+  - `GET /api/tracks/search`
+  - `GET /api/scenes`
+  - `GET /api/scenes/[id]`
+  - `GET /api/audio/[id]`
+  - `GET /api/cover/blobtoon/[trackId].svg`
+  - `GET /api/atlas/map?v=1`
+- Upload flow is real and idempotent by SHA-256 file hash before writing `data/uploads`
+- Audio files are stored on local disk at `data/uploads`
+- Analysis is triggered in-process from ingest and is not durable
+- Analysis pipeline is real:
+  - metadata parse via `music-metadata`
+  - heuristic BPM / key / energy derivation
+  - best-effort CLAP audio embeddings
+  - `READY` / `ERROR` terminal states
+- Playback uses real browser audio streaming through `/api/audio/[id]` with HTTP range support
+- Atlas v1 is implemented and is the primary map surface:
+  - stable `world.version_hash`
+  - deterministic projection
+  - persisted scenes
+  - scene graph edges
+  - provenance / bridge / collision metadata
+- Similarity retrieval is implemented, with persisted graph truth preferred over fallback behavior when available
 
-## Ambiguities / decisions needed
-- Similarity API shape: should `/api/tracks/[id]/similar` include edge metadata (`score`, `basis`, `model_version`) or stay as plain tracks?
-- Async analysis reliability: keep in-process fire-and-forget, or move to a durable queue/worker.
-- Audio embedding support: CLAP path currently supports WAV decoding in Node; non-WAV uploads fall back to text-only similarity.
-- Legacy script overlap: `scripts/compute_similarities.ts` is text-only while ingest/analyze path is hybrid; decide whether to keep, update, or deprecate.
+## Key conclusions
+- The platform is beyond prototype stage and functions as a real local-first alpha
+- The product is strongest today on:
+  - ingest
+  - browse
+  - playback
+  - map exploration
+- The main missing piece is durable graph truth and durable background execution, not UI completeness
+- The main missing piece is durable background execution, not a second map stack
+
+## Remaining risks
+- In-process analysis / rebuild lifecycle is still the main operational risk
+- Search intentionally remains narrower than a broader discovery product
+- Local verification is environment-sensitive because the dev dependency install state is not always guaranteed
+
+## Recommended evaluation framing
+- Stage: functional alpha / internal evaluation build
+- Not yet: production-hardened platform
+- Ready for:
+  - product evaluation
+  - UX iteration
+  - architecture hardening
+- Not ready for:
+  - reliability-sensitive deployment
+  - claiming durable graph persistence as complete

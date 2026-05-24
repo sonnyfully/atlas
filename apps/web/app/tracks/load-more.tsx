@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { TrackRow } from "@/components/tracks/track-row";
+import { TrackRowRich } from "@/components/tracks/track-row-rich";
 import type { Track } from "@atlas/shared";
 
 export function LoadMoreButton({
@@ -42,7 +42,7 @@ export function LoadMoreButton({
       {extraTracks.length > 0 && (
         <div className="space-y-0.5">
           {extraTracks.map((track, i) => (
-            <TrackRow
+            <TrackRowRich
               key={track.id}
               track={track}
               index={initialCount + i}

@@ -1,6 +1,21 @@
 # Atlas Design System
 
-A lightweight design system for Track Atlas — a SoundCloud-inspired music discovery UI built with Next.js, Tailwind CSS, and shadcn/ui (Radix).
+Last verified: 2026-04-05
+Status: active design reference with some historical language preserved
+
+A lightweight design system for Track Atlas built with Next.js, Tailwind CSS, and shadcn/ui primitives.
+
+## Current implementation notes
+- The current web app has moved beyond the earlier mock / SoundCloud-inspired framing
+- The most distinctive implemented additions beyond the base system are:
+  - scene-derived secondary accents
+  - layered surface tokens
+  - motion tokens shared across layout / list / map components
+- When this document conflicts with current source tokens, the source of truth is:
+  - `apps/web/app/globals.css`
+  - `apps/web/lib/colors.ts`
+  - `apps/web/lib/motion.ts`
+  - `apps/web/tailwind.config.ts`
 
 ---
 

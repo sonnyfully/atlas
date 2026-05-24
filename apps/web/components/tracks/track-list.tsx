@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import type { Track } from "@atlas/shared";
-import { TrackRow } from "@/components/tracks/track-row";
+import { TrackRowRich } from "@/components/tracks/track-row-rich";
 import { usePlayer } from "@/lib/player-context";
 
 interface TrackListProps {
@@ -29,11 +29,17 @@ export function TrackList({ tracks, title }: TrackListProps) {
       {title && (
         <h2 className="mb-4 text-h3 text-foreground">{title}</h2>
       )}
-      <div className="space-y-0.5">
-        {tracks.filter((t) => t && t.id).map((track, i) => (
-          <TrackRow key={track.id} track={track} index={i} />
-        ))}
-      </div>
+      {tracks.length === 0 ? (
+        <div className="surface-panel px-6 py-10 text-center">
+          <p className="text-body-sm text-muted-foreground">No tracks to show yet.</p>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {tracks.filter((t) => t && t.id).map((track, i) => (
+            <TrackRowRich key={track.id} track={track} index={i} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

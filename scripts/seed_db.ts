@@ -2,18 +2,13 @@ import { HelixDB } from "helix-ts";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import {
-  generateTextEmbedding,
   generateAudioEmbedding,
-  buildMetadataText,
-  TEXT_EMBEDDING_VERSION,
   AUDIO_EMBEDDING_VERSION,
 } from "../packages/shared/embeddings";
 
 const HELIX_URL = process.env.HELIX_URL ?? "http://localhost:6969";
 const KNN_LIMIT = 10;
-const TEXT_WEIGHT = 0.4;
-const AUDIO_WEIGHT = 0.6;
-const MODEL_VERSION_HYBRID = `${TEXT_EMBEDDING_VERSION}+${AUDIO_EMBEDDING_VERSION}`;
+const ANALYSIS_VERSION = "v2-audio-informed";
 
 type SeedTrack = {
   title: string;
@@ -81,54 +76,24 @@ function rankScore(rank: number, k: number): number {
   return Math.max(0, 1 - rank / Math.max(1, k));
 }
 
-function mergeNeighborScores(
+function buildAudioNeighborScores(
   sourceTrackId: string,
-  textNeighbors: Array<{ id: string }>,
   audioNeighbors: Array<{ id: string }>
-): Array<{ id: string; score: number; basis: "text" | "audio" | "hybrid"; modelVersion: string }> {
-  const byId = new Map<string, { text?: number; audio?: number }>();
-
-  for (let i = 0; i < textNeighbors.length; i++) {
-    const id = textNeighbors[i]?.id;
-    if (!id || id === sourceTrackId) continue;
-    const entry = byId.get(id) ?? {};
-    entry.text = Math.max(entry.text ?? 0, rankScore(i, KNN_LIMIT));
-    byId.set(id, entry);
-  }
-
+): Array<{ id: string; score: number; basis: "audio"; modelVersion: string }> {
+  const byId = new Map<string, number>();
   for (let i = 0; i < audioNeighbors.length; i++) {
     const id = audioNeighbors[i]?.id;
     if (!id || id === sourceTrackId) continue;
-    const entry = byId.get(id) ?? {};
-    entry.audio = Math.max(entry.audio ?? 0, rankScore(i, KNN_LIMIT));
-    byId.set(id, entry);
+    byId.set(id, Math.max(byId.get(id) ?? 0, rankScore(i, KNN_LIMIT)));
   }
 
   return Array.from(byId.entries())
-    .map(([id, scores]) => {
-      if (typeof scores.text === "number" && typeof scores.audio === "number") {
-        return {
-          id,
-          score: scores.text * TEXT_WEIGHT + scores.audio * AUDIO_WEIGHT,
-          basis: "hybrid" as const,
-          modelVersion: MODEL_VERSION_HYBRID,
-        };
-      }
-      if (typeof scores.audio === "number") {
-        return {
-          id,
-          score: scores.audio,
-          basis: "audio" as const,
-          modelVersion: AUDIO_EMBEDDING_VERSION,
-        };
-      }
-      return {
-        id,
-        score: scores.text ?? 0,
-        basis: "text" as const,
-        modelVersion: TEXT_EMBEDDING_VERSION,
-      };
-    })
+    .map(([id, score]) => ({
+      id,
+      score,
+      basis: "audio" as const,
+      modelVersion: AUDIO_EMBEDDING_VERSION,
+    }))
     .sort((a, b) => b.score - a.score)
     .slice(0, KNN_LIMIT);
 }
@@ -218,7 +183,6 @@ async function seed() {
   await mkdir(audioDir, { recursive: true });
 
   const trackIds: string[] = [];
-  const textEmbeddings = new Map<string, number[]>();
   const audioEmbeddings = new Map<string, number[]>();
 
   for (const track of tracks) {
@@ -255,22 +219,15 @@ async function seed() {
       bpm: track.bpm,
       key: track.key,
       energy: track.energy,
+      brightness: Math.min(1, 0.24 + track.energy * 0.5 + (track.bpm / 180) * 0.14),
+      loudness: Math.min(1, 0.22 + track.energy * 0.58),
+      complexity: Math.min(1, 0.28 + Math.abs(track.bpm / 180 - 0.5) * 0.42),
+      bpm_confidence: 0.92,
+      key_confidence: 0.88,
+      analysis_version: ANALYSIS_VERSION,
+      embedding_version: AUDIO_EMBEDDING_VERSION,
       status: "PROCESSING",
     });
-
-    const metadataText = buildMetadataText(
-      track.title,
-      track.artist,
-      track.key,
-      track.bpm,
-      track.energy
-    );
-    const textEmbedding = await generateTextEmbedding(metadataText);
-    await client.query("AddTrackEmbedding", {
-      track_id: trackId,
-      embedding: textEmbedding,
-    });
-    textEmbeddings.set(trackId, textEmbedding);
 
     const audioEmbedding = await generateAudioEmbedding(filepath);
     await client.query("AddAudioEmbedding", {
@@ -283,40 +240,36 @@ async function seed() {
       id: trackId,
       status: "READY",
     });
-    console.log(`  Embedded text+audio for "${track.title}"`);
+    console.log(`  Embedded audio for "${track.title}"`);
   }
 
-  console.log("\nComputing hybrid similarities...");
+  console.log("\nComputing audio similarities...");
   for (const trackId of trackIds) {
-    const textEmbedding = textEmbeddings.get(trackId);
     const audioEmbedding = audioEmbeddings.get(trackId);
-    if (!textEmbedding || !audioEmbedding) continue;
-
-    const textNeighborsRaw = await client.query("FindNeighbors", {
-      embedding: textEmbedding,
-      k: KNN_LIMIT,
-    });
+    if (!audioEmbedding) continue;
     const audioNeighborsRaw = await client.query("FindAudioNeighbors", {
       embedding: audioEmbedding,
       k: KNN_LIMIT,
     });
 
-    const merged = mergeNeighborScores(
-      trackId,
-      unwrapNeighbors(textNeighborsRaw),
-      unwrapNeighbors(audioNeighborsRaw)
-    );
+    const merged = buildAudioNeighborScores(trackId, unwrapNeighbors(audioNeighborsRaw));
 
     for (const neighbor of merged) {
-      await client.query("AddSimilarEdge", {
-        from_id: trackId,
-        to_id: neighbor.id,
-        score: neighbor.score,
-        basis: neighbor.basis,
-        model_version: neighbor.modelVersion,
-      });
+      try {
+        await client.query("AddSimilarEdge", {
+          from_id: trackId,
+          to_id: neighbor.id,
+          score: neighbor.score,
+          basis: "audio",
+          model_version: "seed-audio",
+          updated_at: new Date().toISOString(),
+          build_seq: 0,
+        });
+      } catch (err) {
+        console.warn(`  Skipped similarity edge ${trackId} -> ${neighbor.id}:`, err);
+      }
     }
-    console.log(`  Added ${merged.length} hybrid edges for ${trackId}`);
+    console.log(`  Added ${merged.length} audio edges for ${trackId}`);
   }
 
   const scene = await client.query("AddScene", { name: "Late Night Electronics" });

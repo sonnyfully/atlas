@@ -4,19 +4,30 @@ dist/
 .DS_Store
 data/cache/
 data/uploads/
+data/atlas/
 
 # Environment files
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+*.local
 
 # Next.js build artifacts
 .next/
 out/
+.vercel/
+.turbo/
 
 # TypeScript build artifacts
 *.tsbuildinfo
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 
 # Logs
 *.log
@@ -27,10 +38,13 @@ pnpm-debug.log*
 
 # Test/coverage artifacts
 coverage/
+test-results/
+playwright-report/
 
 # Local editor/tool state
 .idea/
 .vscode/
+.claude/
 
 # Local Helix runtime state
 .helix/

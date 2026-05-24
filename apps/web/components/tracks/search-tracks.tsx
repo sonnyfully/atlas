@@ -11,6 +11,8 @@ import {
 import { Search, Loader2, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { TrackList } from "@/components/tracks/track-list";
+import { useSceneAccent } from "@/lib/colors";
+import { cn } from "@/lib/utils";
 import type { Track } from "@atlas/shared";
 
 // Shared state between SearchInput (in header) and SearchResults (in content area)
@@ -141,9 +143,16 @@ function useSearch() {
 }
 
 /** Renders the search input — place in header */
-export function SearchInput() {
+export function SearchInput({
+  className,
+  inputClassName,
+}: {
+  className?: string;
+  inputClassName?: string;
+}) {
   const { query, isActive, handleChange, handleClear } = useSearch();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const sceneAccent = useSceneAccent(undefined, query || "search");
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -160,14 +169,14 @@ export function SearchInput() {
   }, [handleClear, query]);
 
   return (
-    <div className="relative w-72">
+    <div className={cn("relative w-72", className)} style={sceneAccent.cssVars}>
       <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         ref={inputRef}
         data-atlas-search="true"
-        placeholder="Search tracks, artists, scenes..."
-        aria-label="Search tracks, artists, scenes"
-        className="h-11 pl-9 pr-11"
+        placeholder="Search tracks..."
+        aria-label="Search tracks"
+        className={cn("h-11 pl-9 pr-11", inputClassName)}
         value={query}
         onChange={handleChange}
       />
@@ -176,7 +185,7 @@ export function SearchInput() {
           type="button"
           aria-label="Clear search"
           onClick={handleClear}
-          className="absolute right-0 top-0 inline-flex h-11 w-11 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+          className="focus-ring absolute right-0 top-0 inline-flex h-11 w-11 items-center justify-center text-muted-foreground transition-interactive duration-fast ease-out hover:text-foreground"
         >
           <X className="h-4 w-4" />
         </button>

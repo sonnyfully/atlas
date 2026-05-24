@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSimilarTracks } from "@/lib/helix";
+import { getSimilarTrackResults } from "@/lib/helix";
+import type { SimilarTracksResponse } from "@atlas/shared";
 
 export const dynamic = "force-dynamic";
 
@@ -9,12 +10,21 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    const tracks = await getSimilarTracks(id);
-    return NextResponse.json({ results: tracks });
+    const results = await getSimilarTrackResults(id, 20);
+    return NextResponse.json({
+      source_id: id,
+      results,
+    } satisfies SimilarTracksResponse);
   } catch (err) {
     console.error(`Failed to fetch similar tracks for ${id}:`, err);
     return NextResponse.json(
-      { error: "Failed to fetch similar tracks" },
+      {
+        error: {
+          code: "SIMILAR_FETCH_FAILED",
+          message: "Failed to fetch similar tracks.",
+          retryable: true,
+        },
+      },
       { status: 500 }
     );
   }

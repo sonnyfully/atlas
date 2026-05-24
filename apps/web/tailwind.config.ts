@@ -43,6 +43,12 @@ const config: Config = {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
+        scene: "hsl(var(--scene-h) var(--scene-s) var(--scene-l))",
+        surface: {
+          "0": "hsl(var(--surface-0))",
+          "1": "hsl(var(--surface-1))",
+          "2": "hsl(var(--surface-2))",
+        },
         chart: {
           "1": "hsl(var(--chart-1))",
           "2": "hsl(var(--chart-2))",
@@ -95,6 +101,24 @@ const config: Config = {
         DEFAULT: "0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06)",
         md: "0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05)",
         lg: "0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.04)",
+        surface: "var(--shadow-surface)",
+        "surface-hover": "var(--shadow-surface-hover)",
+        "scene-bloom":
+          "0 0 0 1px hsl(var(--scene-h) var(--scene-s) var(--scene-l) / 0.16), 0 0 30px hsl(var(--scene-h) var(--scene-s) var(--scene-l) / 0.2)",
+      },
+      transitionDuration: {
+        fast: "140ms",
+        medium: "240ms",
+        map: "360ms",
+      },
+      transitionTimingFunction: {
+        standard: "cubic-bezier(0.2, 0, 0, 1)",
+        out: "cubic-bezier(0.16, 1, 0.3, 1)",
+        spring: "cubic-bezier(0.22, 1, 0.36, 1)",
+      },
+      transitionProperty: {
+        interactive: "background-color,border-color,color,box-shadow,transform,opacity",
+        panel: "background-color,border-color,box-shadow,transform,opacity",
       },
       keyframes: {
         "accordion-down": {

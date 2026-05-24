@@ -1,28 +1,38 @@
 "use client";
 
-import { Play, Pause, Share2, Loader2 } from "lucide-react";
+import { Play, Pause, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Waveform } from "@/components/tracks/waveform";
 import { LikeButton } from "@/components/tracks/like-button";
 import { CoverArt } from "@/components/tracks/cover-art";
+import { useSceneAccent } from "@/lib/colors";
 import { usePlayer } from "@/lib/player-context";
 import { formatDuration, cn } from "@/lib/utils";
 import type { Track } from "@atlas/shared";
+
+type TrackWithScene = Track & {
+  scene_name?: string;
+  scene?: string;
+  scene_id?: string;
+};
 
 interface TrackHeroProps {
   track: Track;
 }
 
 export function TrackHero({ track }: TrackHeroProps) {
+  const sceneTrack = track as TrackWithScene;
+  const sceneName = sceneTrack.scene_name ?? sceneTrack.scene;
   const { currentTrack, isPlaying, progress, togglePlay, seek, error } = usePlayer();
+  const sceneAccent = useSceneAccent(sceneTrack.scene_id, track.id || track.artist);
   const isActive = currentTrack?.id === track.id;
   const isThisPlaying = isActive && isPlaying;
   const isProcessing =
     track.status === "PENDING" || track.status === "PROCESSING";
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-6" style={sceneAccent.cssVars}>
       {/* Header row */}
       <div className="flex gap-6">
         {/* Cover */}
@@ -31,7 +41,7 @@ export function TrackHero({ track }: TrackHeroProps) {
             trackId={track.id}
             size={192}
             loading="eager"
-            className="h-full w-full rounded-md shadow-md"
+            className="h-full w-full rounded-md border border-border/70 shadow-surface"
           />
           {isProcessing && (
             <div className="absolute inset-0 flex items-center justify-center">
@@ -48,11 +58,14 @@ export function TrackHero({ track }: TrackHeroProps) {
               {track.artist}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
+              {sceneName && (
+                <Badge variant="scene">{sceneName}</Badge>
+              )}
               {track.status === "READY" && track.key && (
-                <Badge variant="secondary">{track.key}</Badge>
+                <Badge variant="scene">{track.key}</Badge>
               )}
               {track.status === "READY" && track.bpm > 0 && (
-                <Badge variant="secondary">
+                <Badge variant="scene">
                   {Math.round(track.bpm)} BPM
                 </Badge>
               )}
@@ -84,14 +97,6 @@ export function TrackHero({ track }: TrackHeroProps) {
               )}
             </Button>
             <LikeButton ariaLabel={track.title || "track"} />
-            <Button
-              variant="outline"
-              size="icon"
-              aria-label="Share track"
-              className="h-11 w-11 text-muted-foreground"
-            >
-              <Share2 className="h-4 w-4" />
-            </Button>
             <span className="ml-auto text-body-sm font-mono text-muted-foreground tabular-nums">
               {track.duration_sec > 0
                 ? formatDuration(Math.round(track.duration_sec))
@@ -112,6 +117,7 @@ export function TrackHero({ track }: TrackHeroProps) {
             if (!isActive) togglePlay(track);
             seek(pos);
           }}
+          sceneTinted
           className={cn(!isActive && "opacity-70")}
         />
       )}

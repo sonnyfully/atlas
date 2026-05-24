@@ -1,5 +1,21 @@
 # Atlas Discover UI — Component Spec (v1)
 
+Last verified: 2026-04-05
+Status: active spec with implementation notes
+
+## Current implementation notes
+- Implemented today:
+  - sidebar navigation
+  - command-bar style top area
+  - rich clickable track rows
+  - queue-based home-side panel
+  - sticky global player
+  - keyboard shortcuts for search / playback
+- Partially implemented:
+  - likes are local UI state only
+  - responsive collapse behavior described below is not yet the fully hardened evaluation focus
+- Use this document as a product / UX spec, not as a claim that every future-facing behavior below is already complete
+
 ## Goals
 - **Primary action is play**: clicking anywhere on a track row plays it.
 - **Single source of truth for Now Playing**: list highlight, right rail, and bottom player always match.
@@ -16,11 +32,11 @@
 - `SidebarNav` (left)
 - `TopBar` (top)
 - `TrackTable` (main content)
-- `RightRail` (secondary content)
+- `QueuePanel` (secondary content)
 - `GlobalPlayer` (sticky bottom)
 
 **Responsive**
-- `< 1024px`: Right rail collapses into a tab/slide-over (“Queue / Insights”).
+- `< 1024px`: Queue panel collapses away and the page stays focused on the main story.
 - `< 768px`: Sidebar becomes icon-only + drawer.
 
 **Page States**
@@ -35,7 +51,7 @@
 
 ### `TopBar`
 **Elements**
-- Search input: placeholder `Search tracks, artists, scenes…`
+- Search input: placeholder `Search tracks...`
 - Upload button
 - Optional processing indicator (small badge/dot) when background analysis jobs exist
 
@@ -190,9 +206,9 @@ Rules
 
 ⸻
 
-Right Rail (avoid duplication)
+Secondary Queue Panel (avoid duplication)
 
-RightRail
+QueuePanel
 
 Pick one primary mode for v1 (recommended: Queue).
 
@@ -277,4 +293,3 @@ Quality Bar (definition of “done”)
 	•	Icon buttons have ≥44×44 hit areas and aria-labels.
 	•	Right rail provides non-duplicative value (Queue or Insights).
 	•	Spacing/alignment consistent; no clipped text; truncation + tooltips.
-

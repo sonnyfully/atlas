@@ -41,6 +41,29 @@ type PlayerContextValue = PlayerState & PlayerActions;
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
+function describePlaybackIssue(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+
+  const maybeError = error as { name?: unknown; message?: unknown; code?: unknown };
+  const name = typeof maybeError.name === "string" ? maybeError.name : "";
+  const message = typeof maybeError.message === "string" ? maybeError.message : "";
+
+  if (name === "AbortError") return null;
+  if (name === "NotAllowedError") {
+    return "Playback was blocked by the browser. Try pressing play again.";
+  }
+  if (message) return message;
+  if (name) return name;
+  if (typeof maybeError.code === "number") return `Media error ${maybeError.code}`;
+  return null;
+}
+
+function isExpectedPlaybackRejection(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const maybeError = error as { name?: unknown };
+  return maybeError.name === "AbortError" || maybeError.name === "NotAllowedError";
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -56,6 +79,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const currentTrackRef = useRef<Track | null>(null);
   const queueRef = useRef<Track[]>([]);
   const progressRef = useRef(0);
+  const changingSourceRef = useRef(false);
 
   // Keep refs in sync for use in event handlers
   currentTrackRef.current = currentTrack;
@@ -75,6 +99,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
 
     const onEnded = () => {
+      changingSourceRef.current = false;
       const track = currentTrackRef.current;
       const q = queueRef.current;
       if (!track || q.length === 0) {
@@ -88,6 +113,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setCurrentTrack(nextTrack);
         setProgress(0);
         setError(null);
+        changingSourceRef.current = true;
         audio.src = audioUrl(nextTrack.id);
         audio.play().catch(() => {});
       } else {
@@ -97,11 +123,26 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     };
 
     const onError = () => {
-      console.error("Audio playback failed", {
-        code: audio.error?.code,
-        message: audio.error?.message,
+      const code = audio.error?.code;
+      const message = audio.error?.message;
+      const isSourceSwap = changingSourceRef.current;
+      changingSourceRef.current = false;
+
+      // Ignore benign media errors that can fire when a track naturally ends
+      // or when the source is intentionally switched.
+      if (!code || code === 1 || audio.ended || (isSourceSwap && !message)) {
+        setBuffering(false);
+        return;
+      }
+
+      const details = {
+        code,
+        message,
         trackId: currentTrackRef.current?.id,
-      });
+      };
+      if (code || message) {
+        console.error("Audio playback failed", details);
+      }
       setError("Playback unavailable. Try again.");
       setIsPlaying(false);
       setBuffering(false);
@@ -109,10 +150,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     const onWaiting = () => setBuffering(true);
     const onCanPlay = () => {
+      changingSourceRef.current = false;
       setBuffering(false);
       setError(null);
     };
     const onPlaying = () => {
+      changingSourceRef.current = false;
       setBuffering(false);
       setError(null);
     };
@@ -164,12 +207,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
       if (currentTrack?.id !== track.id) {
         setProgress(0);
+        changingSourceRef.current = true;
         audio.src = audioUrl(track.id);
       }
 
       setCurrentTrack(track);
       setIsPlaying(true);
-      audio.play().catch(() => {});
+      audio.play().catch((err) => {
+        const message = describePlaybackIssue(err);
+        if (message) {
+          const log = isExpectedPlaybackRejection(err) ? console.warn : console.error;
+          log("Audio play() rejected", {
+            message,
+            trackId: track.id,
+          });
+          setError(message);
+        }
+        setIsPlaying(false);
+        setBuffering(false);
+      });
     },
     [currentTrack],
   );
@@ -183,7 +239,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
     if (!audio) return;
     setIsPlaying(true);
-    audio.play().catch(() => {});
+    audio.play().catch((err) => {
+      const message = describePlaybackIssue(err);
+      if (message) {
+        const log = isExpectedPlaybackRejection(err) ? console.warn : console.error;
+        log("Audio resume rejected", {
+          message,
+          trackId: currentTrackRef.current?.id,
+        });
+        setError(message);
+      }
+      setIsPlaying(false);
+      setBuffering(false);
+    });
   }, []);
 
   const togglePlay = useCallback(
@@ -211,8 +279,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setProgress(0);
     setError(null);
     setIsPlaying(true);
+    changingSourceRef.current = true;
     audio.src = audioUrl(nextTrack.id);
-    audio.play().catch(() => {});
+    audio.play().catch((err) => {
+      const message = describePlaybackIssue(err);
+      if (message) {
+        console.error("Audio next() rejected", {
+          message,
+          trackId: nextTrack.id,
+        });
+        setError(message);
+      }
+      setIsPlaying(false);
+      setBuffering(false);
+    });
   }, [currentTrack, queue]);
 
   const prev = useCallback(() => {
@@ -225,8 +305,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setProgress(0);
     setError(null);
     setIsPlaying(true);
+    changingSourceRef.current = true;
     audio.src = audioUrl(prevTrack.id);
-    audio.play().catch(() => {});
+    audio.play().catch((err) => {
+      const message = describePlaybackIssue(err);
+      if (message) {
+        console.error("Audio prev() rejected", {
+          message,
+          trackId: prevTrack.id,
+        });
+        setError(message);
+      }
+      setIsPlaying(false);
+      setBuffering(false);
+    });
   }, [currentTrack, queue]);
 
   const seek = useCallback((position: number) => {

@@ -10,6 +10,7 @@ interface WaveformProps {
   height?: number; // px
   onSeek?: (position: number) => void;
   className?: string;
+  sceneTinted?: boolean;
 }
 
 export function Waveform({
@@ -19,6 +20,7 @@ export function Waveform({
   height = 48,
   onSeek,
   className,
+  sceneTinted = false,
 }: WaveformProps) {
   const bars = useMemo(
     () => generateWaveform(trackId, barCount),
@@ -42,7 +44,10 @@ export function Waveform({
       aria-valuenow={onSeek ? Math.round(progress * 100) : undefined}
       tabIndex={onSeek ? 0 : undefined}
       className={cn(
-        "flex items-end gap-px rounded-sm bg-muted",
+        "flex items-end gap-px rounded-sm",
+        sceneTinted
+          ? "bg-[hsl(var(--scene-h)_var(--scene-s)_var(--scene-l)/0.12)]"
+          : "bg-muted",
         onSeek && "cursor-pointer",
         className,
       )}
@@ -55,8 +60,12 @@ export function Waveform({
           <div
             key={i}
             className={cn(
-              "flex-1 rounded-full transition-colors duration-75",
-              filled ? "bg-primary" : "bg-muted-foreground/40",
+              "flex-1 rounded-full transition-colors duration-fast ease-out motion-reduce:transition-none",
+              filled
+                ? sceneTinted
+                  ? "bg-scene"
+                  : "bg-primary"
+                : "bg-muted-foreground/40",
             )}
             style={{ height: `${h * 100}%`, minWidth: 2 }}
           />

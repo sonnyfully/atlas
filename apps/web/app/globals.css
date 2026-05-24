@@ -36,6 +36,22 @@
     /* --- Radius (shadcn base) --- */
     --radius: 0.5rem;
 
+    /* --- Surface depth --- */
+    --surface-0: 0 0% 100%;
+    --surface-1: 0 0% 100%;
+    --surface-2: 0 0% 97%;
+
+    /* --- Scene accent defaults (overridden per wrapper) --- */
+    --scene-h: 206;
+    --scene-s: 58%;
+    --scene-l: 50%;
+    --scene-accent: hsl(var(--scene-h) var(--scene-s) var(--scene-l));
+    --scene-accent-soft: hsl(var(--scene-h) var(--scene-s) var(--scene-l) / 0.14);
+
+    /* --- Surface shadows --- */
+    --shadow-surface: 0 10px 28px -24px rgb(15 23 42 / 0.24), 0 1px 0 0 hsl(var(--border) / 0.75);
+    --shadow-surface-hover: 0 20px 38px -24px rgb(15 23 42 / 0.3), 0 1px 0 0 hsl(var(--border) / 0.9);
+
     /* --- Chart palette --- */
     --chart-1: 18 100% 50%;
     --chart-2: 220 70% 55%;
@@ -100,6 +116,15 @@
     --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: 0 0% 16%;
     --sidebar-ring: 18 100% 50%;
+
+    /* --- Surface depth --- */
+    --surface-0: 0 0% 7%;
+    --surface-1: 0 0% 10%;
+    --surface-2: 0 0% 13%;
+
+    /* --- Surface shadows --- */
+    --shadow-surface: 0 16px 34px -28px rgb(0 0 0 / 0.66), 0 1px 0 0 hsl(var(--border) / 0.95);
+    --shadow-surface-hover: 0 26px 46px -28px rgb(0 0 0 / 0.78), 0 1px 0 0 hsl(var(--border));
   }
 }
 
@@ -110,8 +135,85 @@
 
   body {
     @apply bg-background text-foreground;
+    background-image: radial-gradient(
+      1100px 420px at 10% -10%,
+      hsl(var(--scene-h) var(--scene-s) var(--scene-l) / 0.06),
+      transparent 62%
+    );
     font-feature-settings: "rlig" 1, "calt" 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+}
+
+@layer components {
+  .surface-0 {
+    background-color: hsl(var(--surface-0));
+  }
+
+  .surface-1 {
+    background-color: hsl(var(--surface-1));
+  }
+
+  .surface-2 {
+    background-color: hsl(var(--surface-2));
+  }
+
+  .surface-panel {
+    @apply rounded-xl border border-border/70 bg-surface-1 shadow-surface;
+  }
+
+  .surface-panel-interactive {
+    @apply transition-panel duration-fast ease-out motion-reduce:transition-none;
+  }
+
+  .surface-panel-interactive:hover,
+  .surface-panel-interactive:focus-within {
+    background-color: hsl(var(--surface-2));
+    border-color: hsl(var(--scene-h) var(--scene-s) var(--scene-l) / 0.3);
+    box-shadow:
+      var(--shadow-surface-hover),
+      0 0 0 1px hsl(var(--scene-h) var(--scene-s) var(--scene-l) / 0.12),
+      0 0 26px hsl(var(--scene-h) var(--scene-s) var(--scene-l) / 0.18);
+  }
+
+  .scene-selected {
+    background-color: hsl(var(--scene-h) var(--scene-s) var(--scene-l) / 0.12);
+    border-color: hsl(var(--scene-h) var(--scene-s) var(--scene-l) / 0.35);
+  }
+
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* --- Atlas map animations --- */
+@keyframes atlas-pulse {
+  0%, 100% { r: var(--pulse-r); opacity: 0.5; }
+  50% { r: var(--pulse-r-max); opacity: 0.2; }
+}
+
+@keyframes atlas-edge-flow {
+  to { stroke-dashoffset: -24; }
+}
+
+@keyframes atlas-node-enter {
+  from { opacity: 0; transform: scale(0.4); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes atlas-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

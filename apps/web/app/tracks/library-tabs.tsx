@@ -16,9 +16,9 @@ export function LibraryTabs({ activeSort }: { activeSort: string }) {
           key={tab.sort}
           href={`/tracks?sort=${tab.sort}`}
           className={cn(
-            "px-4 py-2 text-body-sm font-medium transition-colors -mb-px border-b-2",
+            "focus-ring -mb-px border-b-2 px-4 py-2 text-body-sm font-medium transition-interactive duration-fast ease-out",
             activeSort === tab.sort
-              ? "border-primary text-foreground"
+              ? "border-[hsl(var(--scene-h)_var(--scene-s)_var(--scene-l)/0.7)] text-foreground"
               : "border-transparent text-muted-foreground hover:text-foreground"
           )}
         >

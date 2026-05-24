@@ -45,8 +45,8 @@ pnpm smoke-test
 |--------|------|-------------|
 | `Track` | Node | Music track with title, artist, filepath |
 | `Scene` | Node | Micro-genre / vibe cluster |
-| `Track_Vector` | Vector | 384-dim embedding for a track |
-| `HAS_EMBEDDING` | Edge | Track -> Track_Vector |
+| `Audio_Vector` | Vector | 512-dim audio embedding for a track |
+| `HAS_AUDIO_EMBEDDING` | Edge | Track -> Audio_Vector |
 | `IN_SCENE` | Edge | Track -> Scene |
 | `SIMILAR_TO` | Edge | Track -> Track (with score) |
 
@@ -57,8 +57,8 @@ pnpm smoke-test
 | `AddTrack` | title, artist, filepath | Create a new track node |
 | `GetTrack` | id | Retrieve a track by ID |
 | `AddScene` | name | Create a new scene node |
-| `AddTrackEmbedding` | track_id, embedding | Attach a vector to a track |
-| `FindNeighbors` | track_id, k | Vector similarity search |
+| `AddAudioEmbedding` | track_id, embedding | Attach an audio vector to a track |
+| `FindAudioNeighbors` | embedding, k | Audio vector similarity search |
 
 All queries use the `#[mcp]` macro and should be called via named query through `helix-ts`:
 

@@ -26,13 +26,24 @@ echo ""
 echo "1. Uploading file..."
 RESPONSE=$(curl -s -w "\n%{http_code}" -F "file=@$FILE" "$BASE_URL/api/ingest")
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-BODY=$(echo "$RESPONSE" | head -n -1)
+# POSIX-compatible body extraction (BSD head doesn't support -n -1).
+BODY=$(printf "%s\n" "$RESPONSE" | sed '$d')
 
 echo "   HTTP $HTTP_CODE"
 echo "   Response: $BODY"
 
+if [ "$HTTP_CODE" != "200" ] && ! printf "%s" "$BODY" | python3 -m json.tool >/dev/null 2>&1; then
+  echo "   FAILED: Non-JSON error response from ingest"
+  exit 1
+fi
+
 if [ "$HTTP_CODE" != "200" ]; then
-  echo "   FAILED: Expected HTTP 200"
+  echo "   FAILED: Expected HTTP 200 with JSON body"
+  exit 1
+fi
+
+if ! printf "%s" "$BODY" | python3 -m json.tool >/dev/null 2>&1; then
+  echo "   FAILED: Expected JSON success payload from ingest"
   exit 1
 fi
 
@@ -55,7 +66,7 @@ for i in $(seq 1 15); do
     echo ""
     echo "4. Verifying similar-track relationships..."
     SIMILAR_RESPONSE=$(curl -s "$BASE_URL/api/tracks/$TRACK_ID/similar")
-    SIMILAR_COUNT=$(echo "$SIMILAR_RESPONSE" | grep -o '"id":"' | wc -l | tr -d ' ')
+    SIMILAR_COUNT=$(echo "$SIMILAR_RESPONSE" | grep -o '"track":{' | wc -l | tr -d ' ')
     ALL_TRACKS_RESPONSE=$(curl -s "$BASE_URL/api/tracks")
     TOTAL_TRACKS=$(echo "$ALL_TRACKS_RESPONSE" | grep -o '"id":"' | wc -l | tr -d ' ')
     echo "   Similar tracks for upload: $SIMILAR_COUNT"
@@ -70,6 +81,14 @@ for i in $(seq 1 15); do
     if [ "$TOTAL_TRACKS" -lt 2 ]; then
       echo "   Note: only one track exists, so similar relationships are not expected yet"
     fi
+
+    echo ""
+    echo "5. Checking atlas v1 map payload..."
+    MAP_RESPONSE=$(curl -s "$BASE_URL/api/atlas/map?v=1")
+    MAP_SCENE_COUNT=$(echo "$MAP_RESPONSE" | grep -o '"id":"' | wc -l | tr -d ' ')
+    MAP_EDGE_COUNT=$(echo "$MAP_RESPONSE" | grep -o '"from_scene_id":"' | wc -l | tr -d ' ')
+    echo "   Atlas scenes: ${MAP_SCENE_COUNT:-0}"
+    echo "   Atlas scene edges: ${MAP_EDGE_COUNT:-0}"
 
     echo ""
     echo "=== Upload test PASSED ==="

@@ -2,15 +2,11 @@ import { HelixDB } from "helix-ts";
 import { access } from "fs/promises";
 import {
   generateAudioEmbedding,
-  TEXT_EMBEDDING_VERSION,
   AUDIO_EMBEDDING_VERSION,
 } from "../packages/shared/embeddings";
 
 const HELIX_URL = process.env.HELIX_URL ?? "http://localhost:6969";
 const KNN_LIMIT = 10;
-const TEXT_WEIGHT = 0.4;
-const AUDIO_WEIGHT = 0.6;
-const MODEL_VERSION_HYBRID = `${TEXT_EMBEDDING_VERSION}+${AUDIO_EMBEDDING_VERSION}`;
 
 type TrackNode = {
   id: string;
@@ -42,25 +38,6 @@ function unwrapNodeArray(result: unknown): TrackNode[] {
   return [];
 }
 
-function extractEmbedding(result: unknown): number[] | null {
-  const nodes = unwrapNodeArray(result);
-  for (const node of nodes as Array<TrackNode & { embedding?: unknown }>) {
-    if (Array.isArray(node.embedding)) {
-      return node.embedding.filter((n): n is number => typeof n === "number");
-    }
-  }
-  if (result && typeof result === "object") {
-    const obj = result as Record<string, unknown>;
-    for (const value of Object.values(obj)) {
-      if (value && typeof value === "object" && Array.isArray((value as { embedding?: unknown }).embedding)) {
-        const embedding = (value as { embedding: unknown[] }).embedding;
-        return embedding.filter((n): n is number => typeof n === "number");
-      }
-    }
-  }
-  return null;
-}
-
 async function mcpPost(endpoint: string, body: Record<string, unknown>): Promise<unknown> {
   const res = await fetch(`${HELIX_URL}/${endpoint}`, {
     method: "POST",
@@ -75,26 +52,50 @@ async function mcpPost(endpoint: string, body: Record<string, unknown>): Promise
   }
 }
 
+async function mcpFilterItems(
+  connectionId: string,
+  propertyFilters: Array<{
+    key: string;
+    operator: "==" | "!=" | ">" | ">=" | "<" | "<=";
+    value: string | number | boolean | Array<string | number | boolean>;
+  }>
+): Promise<void> {
+  await mcpPost("mcp/filter_items", {
+    connection_id: connectionId,
+    data: {
+      filter: {
+        properties: [propertyFilters],
+      },
+    },
+  });
+}
+
+async function mcpCollect(
+  connectionId: string,
+  options?: {
+    range?: { start: number; end: number };
+    drop?: boolean;
+  }
+): Promise<unknown> {
+  return mcpPost("mcp/collect", {
+    connection_id: connectionId,
+    ...(options?.range ? { range: options.range } : {}),
+    ...(typeof options?.drop === "boolean" ? { drop: options.drop } : {}),
+  });
+}
+
 async function getAllReadyTracks(): Promise<TrackNode[]> {
   const connId = (await mcpPost("mcp/init", {})) as string;
   await mcpPost("mcp/n_from_type", {
     connection_id: connId,
     data: { node_type: "Track" },
   });
-  await mcpPost("mcp/filter_items", {
-    connection_id: connId,
-    data: {
-      properties: [{ key: "status", operation: "==", value: "READY" }],
-    },
-  });
-  const rows = await mcpPost("mcp/collect", {
-    connection_id: connId,
-    data: {},
-  });
+  await mcpFilterItems(connId, [{ key: "status", operator: "==", value: "READY" }]);
+  const rows = await mcpCollect(connId);
   return unwrapNodeArray(rows);
 }
 
-async function hasEdge(trackId: string, edgeType: "HAS_EMBEDDING" | "HAS_AUDIO_EMBEDDING"): Promise<boolean> {
+async function hasAudioEdge(trackId: string): Promise<boolean> {
   const connId = (await mcpPost("mcp/init", {})) as string;
   await mcpPost("mcp/n_from_id", {
     connection_id: connId,
@@ -102,63 +103,33 @@ async function hasEdge(trackId: string, edgeType: "HAS_EMBEDDING" | "HAS_AUDIO_E
   });
   await mcpPost("mcp/out_step", {
     connection_id: connId,
-    data: { edge_type: edgeType },
+    data: { edge_type: "HAS_AUDIO_EMBEDDING" },
   });
-  const rows = await mcpPost("mcp/collect", {
-    connection_id: connId,
-    data: { range: { start: 0, end: 1 } },
+  const rows = await mcpCollect(connId, {
+    range: { start: 0, end: 1 },
   });
   return unwrapNodeArray(rows).length > 0;
 }
 
-function mergeNeighborScores(
+function buildAudioNeighborScores(
   sourceTrackId: string,
-  textNeighbors: Array<{ id: string }>,
   audioNeighbors: Array<{ id: string }>
-): Array<{ id: string; score: number; basis: "text" | "audio" | "hybrid"; modelVersion: string }> {
-  const byId = new Map<string, { text?: number; audio?: number }>();
-
-  for (let i = 0; i < textNeighbors.length; i++) {
-    const id = textNeighbors[i]?.id;
-    if (!id || id === sourceTrackId) continue;
-    const entry = byId.get(id) ?? {};
-    entry.text = Math.max(entry.text ?? 0, rankScore(i, KNN_LIMIT));
-    byId.set(id, entry);
-  }
+): Array<{ id: string; score: number; basis: "audio"; modelVersion: string }> {
+  const byId = new Map<string, number>();
 
   for (let i = 0; i < audioNeighbors.length; i++) {
     const id = audioNeighbors[i]?.id;
     if (!id || id === sourceTrackId) continue;
-    const entry = byId.get(id) ?? {};
-    entry.audio = Math.max(entry.audio ?? 0, rankScore(i, KNN_LIMIT));
-    byId.set(id, entry);
+    byId.set(id, Math.max(byId.get(id) ?? 0, rankScore(i, KNN_LIMIT)));
   }
 
   return Array.from(byId.entries())
-    .map(([id, scores]) => {
-      if (typeof scores.text === "number" && typeof scores.audio === "number") {
-        return {
-          id,
-          score: scores.text * TEXT_WEIGHT + scores.audio * AUDIO_WEIGHT,
-          basis: "hybrid" as const,
-          modelVersion: MODEL_VERSION_HYBRID,
-        };
-      }
-      if (typeof scores.audio === "number") {
-        return {
-          id,
-          score: scores.audio,
-          basis: "audio" as const,
-          modelVersion: AUDIO_EMBEDDING_VERSION,
-        };
-      }
-      return {
-        id,
-        score: scores.text ?? 0,
-        basis: "text" as const,
-        modelVersion: TEXT_EMBEDDING_VERSION,
-      };
-    })
+    .map(([id, score]) => ({
+      id,
+      score,
+      basis: "audio" as const,
+      modelVersion: AUDIO_EMBEDDING_VERSION,
+    }))
     .sort((a, b) => b.score - a.score)
     .slice(0, KNN_LIMIT);
 }
@@ -183,14 +154,7 @@ async function main() {
       continue;
     }
 
-    const hasText = await hasEdge(track.id, "HAS_EMBEDDING");
-    if (!hasText) {
-      console.log(`- Skip ${title}: no text embedding`);
-      skipped++;
-      continue;
-    }
-
-    const alreadyHasAudio = await hasEdge(track.id, "HAS_AUDIO_EMBEDDING");
+    const alreadyHasAudio = await hasAudioEdge(track.id);
     if (alreadyHasAudio) {
       console.log(`- Skip ${title}: audio embedding already exists`);
       skipped++;
@@ -205,36 +169,26 @@ async function main() {
         embedding: audioEmbedding,
       });
 
-      const textVectorResult = await client.query("GetTrackEmbedding", { track_id: track.id });
-      const textEmbedding = extractEmbedding(textVectorResult);
-      if (!textEmbedding || textEmbedding.length === 0) {
-        console.log(`- Skip ${title}: text vector content missing`);
-        skipped++;
-        continue;
-      }
-
-      const textNeighborsRaw = await client.query("FindNeighbors", {
-        embedding: textEmbedding,
-        k: KNN_LIMIT,
-      });
       const audioNeighborsRaw = await client.query("FindAudioNeighbors", {
         embedding: audioEmbedding,
         k: KNN_LIMIT,
       });
-      const merged = mergeNeighborScores(
-        track.id,
-        unwrapNodeArray(textNeighborsRaw),
-        unwrapNodeArray(audioNeighborsRaw)
-      );
+      const merged = buildAudioNeighborScores(track.id, unwrapNodeArray(audioNeighborsRaw));
 
       for (const neighbor of merged) {
-        await client.query("AddSimilarEdge", {
-          from_id: track.id,
-          to_id: neighbor.id,
-          score: neighbor.score,
-          basis: neighbor.basis,
-          model_version: neighbor.modelVersion,
-        });
+        try {
+          await client.query("AddSimilarEdge", {
+            from_id: track.id,
+            to_id: neighbor.id,
+            score: neighbor.score,
+            basis: "audio",
+            model_version: "backfill-audio",
+            updated_at: new Date().toISOString(),
+            build_seq: 0,
+          });
+        } catch (err) {
+          console.warn(`- Skipped similarity edge ${track.id} -> ${neighbor.id}:`, err);
+        }
       }
 
       processed++;

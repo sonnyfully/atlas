@@ -1,103 +1,128 @@
 # State
 
-Last verified: 2026-02-17
+Last verified: 2026-04-05
 
 ## Truth Snapshot
 
 ### Working
-- Upload ingestion: `POST /api/ingest` validates MIME/extension/size, deduplicates by SHA-256, stores file on disk, creates `Track`, and starts async analysis.
-- Ingest now hard-checks Helix availability and returns actionable `503` errors when Helix is down instead of generic `500`.
-- Track browse/read APIs:
+- Discover/Desktop UX hierarchy is implemented:
+  - Atlas overview with search input, upload CTA, and build / readiness status
+  - rich track rows with scene-tinted waveform lanes and queue integration
+  - queue context is rendered directly on the home page
+  - sticky bottom player uses a real `HTMLAudioElement` with seek, volume, mute, prev/next, buffering/error states, and keyboard shortcuts
+- Upload ingestion is implemented:
+  - `POST /api/ingest` validates MIME type, extension, and size
+  - upload is deduplicated by SHA-256 (`Track.file_hash`)
+  - files are stored on local disk in `data/uploads`
+  - ingest hard-checks Helix availability and returns actionable `503` errors when Helix is unavailable
+  - background analysis is triggered immediately after track creation
+- Track browse/read APIs are implemented:
   - `GET /api/tracks`
   - `GET /api/tracks/[id]`
   - `GET /api/tracks/search?q=...&limit=...`
-- Deterministic cover art API: `GET /api/cover/blobtoon/[trackId].svg?v=1&s=<size>` returns seeded SVG covers with immutable caching + ETag/304 support.
-- Audio playback API: `GET /api/audio/[id]` serves full/range streams for `READY` tracks.
-- Analysis pipeline (`apps/web/lib/analyze.ts`) runs metadata extraction + audio embedding and finishes with `READY/ERROR`.
-- Similar retrieval contract is now edge-enriched:
-  - `GET /api/tracks/[id]/similar` returns `{ source_id, results: [{ track, score, basis, model_version, updated_at }] }`.
-- Sound map is implemented:
-  - `GET /api/map/atlas` returns map graph payload (`nodes`, `edges`, `scenes`, `meta`).
-  - `POST /api/map/rebuild` forces a rebuild.
-  - `/map` renders interactive graph UI (filters, pan/zoom, gradient edges, click pin card, double-click navigation).
-- Atlas rebuild lifecycle exists:
-  - Debounced `scheduleAtlasRebuild()` triggers after successful analysis.
-  - Snapshot persistence at `data/atlas/latest.json`.
-- Frontend pages using real data: `/`, `/upload`, `/tracks`, `/track/[id]`, `/map`.
-- Cover rendering in track list rows, track hero, mini player, right rail, and compact track widgets now uses Blobtoon URL covers with deterministic fallback placeholders.
-- Client polling for async completion remains active (`TrackStatusPoller`, 2s).
+- Deterministic cover art API is implemented:
+  - `GET /api/cover/blobtoon/[trackId].svg?v=1&s=<size>`
+  - stable SVG output, immutable caching, and ETag / `304` support
+- Audio playback API is implemented:
+  - `GET /api/audio/[id]` serves full-file and range requests for `READY` tracks
+- Analysis pipeline is implemented:
+  - metadata extraction via `music-metadata`
+  - heuristic BPM / key / energy derivation
+  - audio embedding generation via CLAP when decode succeeds
+  - status lifecycle `PENDING -> PROCESSING -> READY | ERROR`
+- Similar retrieval is implemented:
+  - `GET /api/tracks/[id]/similar` returns `{ source_id, results: [{ track, score, basis, model_version, updated_at }] }`
+  - current read path prefers persisted graph truth and falls back only when needed
+- Collision and scene APIs are implemented:
+  - `GET /api/tracks/[id]/collisions`
+  - `GET /api/scenes`
+  - `GET /api/scenes/[id]`
+- Atlas v1 3D sound map is implemented:
+  - `GET /api/atlas/map?v=1` returns `{ world, tracks, scenes, scene_graph_edges }`
+  - backend computes deterministic projection, scene clustering, scene graph edges, bridge / collision scores, and provenance
+  - payloads are cached by `world.version_hash` in memory and on disk at `data/atlas/v1/<hash>.json`
+  - `/map` renders the React Three Fiber planet-skim map with toroidal wrap, scene aura blobs, scene arcs, selection, and player integration
+- Frontend pages using real data:
+  - `/`
+  - `/upload`
+  - `/tracks`
+  - `/track/[id]`
+  - `/map`
+  - `/scenes`
+  - `/scenes/[id]`
+- Client polling for async completion remains active on the track detail page (`2s`)
 
 ### Partial
-- Similarity edge persistence in Helix (`AddSimilarEdge`) is still unreliable in this environment (`Graph error: Unsupported value type`); retrieval currently uses deterministic audio-feature scoring from READY tracks.
-- `Scene`/`IN_SCENE` schema was expanded for map metadata, but current map rendering uses computed scenes from atlas build output rather than persisted scene graph writes.
-- Audio-embedding generation still depends on WAV decode support in Node CLAP path; non-WAV can still reduce similarity quality until decode coverage is expanded.
+- Search remains intentionally track-first:
+  - UI no longer advertises multiple scopes
+  - backend performs track search only
+- Audio embedding generation still has decode constraints in the current Node runtime:
+  - WAV works on the active CLAP path
+  - optional ffmpeg fallback broadens decode coverage, but local environments can still differ
+- Library / likes are only partially productized:
+  - `/tracks` is a working browseable catalog
+  - likes are local UI state only
+  - there is no auth or persisted user library yet
 
 ### Stubbed
-- None on primary user-facing map/similarity surfaces.
+- `apps/api/` is still only a scaffold; all active API routes live in `apps/web/app/api/`
 
-### Broken
-- No hard compile/runtime breakages verified in source for core flows.
-- Operational caveat remains: analysis and rebuild scheduling run in-process; process restart loses in-flight work.
+### Broken / Operational Caveats
+- Analysis and atlas rebuild scheduling still run in-process; a process restart loses in-flight work
+- Local scripted verification currently depends on dev dependencies actually being installed; repo scripts exist, but the current checkout may not always be in a runnable state
 
 ## Invariants And Verification
 
 ### Invariants
-- `Track.status` lifecycle remains `PENDING -> PROCESSING -> READY` or `ERROR`.
-- Duplicate upload detection remains SHA-256 based (`Track.file_hash`).
+- `Track.status` lifecycle remains `PENDING -> PROCESSING -> READY` or `ERROR`
+- Duplicate upload detection remains SHA-256 based (`Track.file_hash`)
+- Audio playback is gated on `Track.status === "READY"`
 - Cover generation invariants:
-  - seed is derived server-side from `Track.file_hash` when present, else `trackId` hash.
-  - SVG payload is deterministic for `(seed, version, size)`.
-  - no user strings are embedded in SVG markup.
-- `GET /api/audio/[id]` rejects non-READY tracks (`422`) and missing files (`404`).
-- Map availability gate:
-  - `READY tracks >= 3`
-  - `similar edges >= 2`
-- `/map` click model:
-  - single-click opens pin card
-  - double-click navigates `/track/[id]`
+  - seed is derived server-side from `Track.file_hash` when present, else `trackId`
+  - SVG payload is deterministic for `(seed, version, size)`
+  - no user strings are embedded in SVG markup
+- Atlas v1 invariants:
+  - `world.version_hash` changes when the ready-track dataset materially changes
+  - `track.pos` values are stable for a fixed dataset
+  - scene graph edges are scene-to-scene only in v1
 
 ### Verify with commands
 ```bash
 bash scripts/init_db.sh
-pnpm smoke-test
 pnpm dev:web
+pnpm atlas:prep
+pnpm atlas:smoke
 bash scripts/test_upload.sh data/seed_audio/midnight_drive.wav
 curl -s http://localhost:3000/api/tracks/<id>/similar
-curl -s http://localhost:3000/api/map/atlas
+curl -s 'http://localhost:3000/api/atlas/map?v=1'
 ```
 
 ### Verify manually
-- Upload MP3/WAV from `/upload`; confirm ingest succeeds and status transitions to `READY`.
-- Open `/track/<id>` and confirm Similar Tracks shows score/basis badges.
+- Upload MP3/WAV from `/upload`; confirm ingest succeeds and status transitions to `READY`
+- Open `/track/<id>` and confirm Similar Tracks shows ranked results
+- Play a `READY` track from the list or map and confirm the bottom player streams audio through `/api/audio/[id]`
 - Open `/map` and verify:
-  - graph renders (not placeholder),
-  - filters adjust view,
-  - single-click opens floating pin card,
-  - double-click opens track page.
-- Stop Helix and hit `/api/map/atlas`; confirm structured unavailable response and UI unavailable state.
+  - 3D planet-skim scene renders
+  - hover and click selection behave correctly
+  - sidebar actions open DNA and scene proof pages
+  - `Highlight Neighbors` lights up neighboring tracks / scenes
 
 ## Known Gaps / Tech Debt
-- No durable queue/worker for analysis or atlas rebuild jobs.
-- Helix edge write path for string-heavy `SIMILAR_TO` metadata currently unreliable; dynamic similarity scoring is used as runtime fallback.
-- Similarity model is currently deterministic audio-feature scoring (`v3-audio-only`) on read path, not persisted graph retrieval.
-- Text/hybrid similarity edges are removed from active runtime and scripts; audio is the only basis.
+- No durable queue / worker for analysis or atlas rebuild jobs
+- Search remains intentionally narrower than a broader discovery product
 
 ## Now / Next / Later
 
-### Now (verified current reality)
-- Core ingest -> analyze -> browse -> playback loop is implemented and connected.
-- Similar retrieval endpoint returns ranked edge metadata.
-- Sound map is implemented with interactive UX and atlas API contracts.
+### Now
+- Core ingest -> analyze -> browse -> search -> playback loop is implemented and connected
+- Similar retrieval endpoint is implemented and usable
+- Atlas v1 3D map is implemented and is the primary map experience
 
-### Next (clearly implied by current code/comments)
-- Stabilize Helix `SIMILAR_TO` write semantics and migrate map/similar reads to persisted audio graph edges.
-- Persist scene assignments (`Scene` + `IN_SCENE`) from atlas rebuild job.
-- Add durable background execution model for analysis + rebuild tasks.
+### Next
+- Add a durable background execution model for analysis + rebuild tasks
+- Expand search only if the product needs broader discovery than the current flow
 
-### Later (proposed)
-- Replace deterministic audio-feature scorer with validated audio-vector retrieval once edge persistence is stable.
-- Add scene adjacency/collision layers on top of current atlas graph.
-- Add observability around atlas build latency, failure reasons, and stale-snapshot age.
-
-## Notes
-- This state reflects actual code/runtime behavior as of 2026-02-17, including dynamic fallback choices made to keep similarity and map UX functional while Helix edge writes are unstable.
+### Later
+- Add auth, persisted likes, and user-owned library features
+- Add observability around atlas build latency, failure reasons, and snapshot freshness
+- Decide whether to fully remove or intentionally retain the legacy atlas v0 path

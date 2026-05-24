@@ -1,150 +1,130 @@
-import { parseFile } from "music-metadata";
+import { parseFile, type IAudioMetadata } from "music-metadata";
 import {
   updateTrackAnalysis,
   updateTrackError,
-  addTrackEmbedding,
   addAudioEmbedding,
-  findNeighbors,
   findAudioNeighbors,
-  addSimilarEdge,
 } from "@/lib/helix";
 import {
-  generateTextEmbedding,
-  generateAudioEmbedding,
-  buildMetadataText,
-  TEXT_EMBEDDING_VERSION,
-  AUDIO_EMBEDDING_VERSION,
+  ANALYSIS_VERSION,
+  buildFallbackAudioFeatures,
+  estimateAudioFeatures,
+  normalizeMusicalKey,
+} from "@/lib/audio-analysis";
+import {
+  decodeAudioFile,
+  generateAudioEmbeddingWithDetails,
 } from "@atlas/shared/embeddings";
-
-// ── Audio Analysis Pipeline ─────────────────────────────────
-// Extracts metadata + features from an audio file, generates a
-// metadata-based embedding vector, and writes everything to Helix.
+import { scheduleAtlasRefresh } from "@/lib/atlas-refresh";
 
 const KNN_LIMIT = 10;
-const TEXT_WEIGHT = 0.4;
-const AUDIO_WEIGHT = 0.6;
 
-// Try to detect BPM from ID3 tags or filename patterns
-function extractBpmHint(
-  tags: unknown,
-  filename: string
-): number {
-  // Check common ID3 BPM fields
-  const t = tags as any;
-  const bpmTag = t?.bpm ?? t?.TBPM ?? t?.["TXXX:BPM"];
-  if (bpmTag) {
-    const parsed = parseFloat(String(bpmTag));
-    if (!isNaN(parsed) && parsed > 0) return parsed;
+export interface NumericHint {
+  value: number;
+  confidence: number;
+}
+
+export interface StringHint {
+  value: string;
+  confidence: number;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function validBpm(value: number): number {
+  return Number.isFinite(value) && value >= 60 && value <= 200 ? value : 0;
+}
+
+function parseNumeric(value: unknown): number {
+  const parsed = Number.parseFloat(String(value ?? ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function findNativeTag(metadata: IAudioMetadata, names: string[]): unknown {
+  for (const tagList of Object.values(metadata.native ?? {})) {
+    if (!Array.isArray(tagList)) continue;
+    for (const item of tagList) {
+      const id = typeof item?.id === "string" ? item.id : "";
+      if (names.some((name) => name.toLowerCase() === id.toLowerCase())) {
+        return item?.value;
+      }
+    }
+  }
+  return undefined;
+}
+
+export function extractBpmHint(metadata: IAudioMetadata, filename: string): NumericHint {
+  const commonTags = metadata.common as unknown as Record<string, unknown>;
+  const commonBpm = validBpm(parseNumeric(commonTags?.bpm));
+  if (commonBpm > 0) {
+    return { value: commonBpm, confidence: 0.92 };
   }
 
-  // Try filename pattern: "Artist - Title [120BPM]" or "track_128bpm"
+  const nativeBpm = validBpm(
+    parseNumeric(findNativeTag(metadata, ["TBPM", "TXXX:BPM", "bpm", "TEMPO"]))
+  );
+  if (nativeBpm > 0) {
+    return { value: nativeBpm, confidence: 0.86 };
+  }
+
   const match = filename.match(/(\d{2,3})\s*bpm/i);
   if (match) {
-    const parsed = parseInt(match[1], 10);
-    if (parsed >= 60 && parsed <= 200) return parsed;
+    const parsed = validBpm(Number.parseInt(match[1]!, 10));
+    if (parsed > 0) return { value: parsed, confidence: 0.55 };
   }
 
-  return 0;
+  return { value: 0, confidence: 0 };
 }
 
-// Try to detect key from ID3 tags or filename
-function extractKeyHint(
-  tags: unknown,
-  filename: string
-): string {
-  const t = tags as any;
-  const keyTag = t?.key ?? t?.TKEY ?? t?.initialKey ?? t?.["TXXX:KEY"];
-  if (keyTag && typeof keyTag === "string") return keyTag;
-
-  // Filename pattern: "Artist - Title [Am]" or "[Cmaj]"
-  const match = filename.match(
-    /\[([A-G][#b]?(?:m|min|maj)?)\]/i
+export function extractKeyHint(metadata: IAudioMetadata, filename: string): StringHint {
+  const commonTags = metadata.common as unknown as Record<string, unknown>;
+  const commonKey = normalizeMusicalKey(
+    parseString(commonTags?.initialKey) || parseString(commonTags?.key)
   );
-  if (match) return match[1];
+  if (commonKey) {
+    return { value: commonKey, confidence: 0.9 };
+  }
 
-  return "";
+  const nativeKey = normalizeMusicalKey(
+    parseString(findNativeTag(metadata, ["TKEY", "TXXX:KEY", "initialKey", "key"]))
+  );
+  if (nativeKey) {
+    return { value: nativeKey, confidence: 0.84 };
+  }
+
+  const match = filename.match(/\[([A-G][#b]?(?:m|min|maj|minor|major)?)\]/i);
+  if (match) {
+    const parsed = normalizeMusicalKey(match[1] ?? "");
+    if (parsed) return { value: parsed, confidence: 0.5 };
+  }
+
+  return { value: "", confidence: 0 };
 }
 
-// Compute a rough energy proxy from available metadata.
-// Falls back to a hash-based value if no tags exist.
-function computeEnergyProxy(
-  bpm: number,
-  _durationSec: number,
-  title: string
-): number {
-  if (bpm > 0) {
-    // BPM-based heuristic: map 60-180 BPM to 0.2-0.9
-    return Math.min(0.95, Math.max(0.1, (bpm - 60) / 150));
-  }
-  // Fallback: deterministic hash from title
-  let hash = 0;
-  for (let i = 0; i < title.length; i++) {
-    hash = (hash * 31 + title.charCodeAt(i)) | 0;
-  }
-  return 0.3 + ((hash & 0x7fff) / 0x7fff) * 0.5;
+export function chooseBpm(metadataHint: NumericHint, audioHint: NumericHint): NumericHint {
+  if (metadataHint.value > 0 && metadataHint.confidence >= 0.8) return metadataHint;
+  if (audioHint.value > 0 && audioHint.confidence >= metadataHint.confidence) return audioHint;
+  if (metadataHint.value > 0) return metadataHint;
+  return audioHint;
 }
 
-function rankScore(rank: number, k: number): number {
-  return Math.max(0, 1 - rank / Math.max(1, k));
+export function chooseKey(metadataHint: StringHint, audioHint: StringHint): StringHint {
+  if (metadataHint.value && metadataHint.confidence >= 0.8) return metadataHint;
+  if (audioHint.value && audioHint.confidence >= metadataHint.confidence) return audioHint;
+  if (metadataHint.value) return metadataHint;
+  return audioHint;
 }
 
-function mergeNeighborScores(
-  trackId: string,
-  textNeighbors: Array<{ id: string }>,
-  audioNeighbors: Array<{ id: string }>
-): Array<{
-  id: string;
-  score: number;
-  basis: "text" | "audio" | "hybrid";
-  modelVersion: string;
-}> {
-  const scoreByTrack = new Map<string, { text?: number; audio?: number }>();
-
-  for (let i = 0; i < textNeighbors.length; i++) {
-    const id = textNeighbors[i]?.id;
-    if (!id || id === trackId) continue;
-    const entry = scoreByTrack.get(id) ?? {};
-    entry.text = Math.max(entry.text ?? 0, rankScore(i, KNN_LIMIT));
-    scoreByTrack.set(id, entry);
-  }
-
-  for (let i = 0; i < audioNeighbors.length; i++) {
-    const id = audioNeighbors[i]?.id;
-    if (!id || id === trackId) continue;
-    const entry = scoreByTrack.get(id) ?? {};
-    entry.audio = Math.max(entry.audio ?? 0, rankScore(i, KNN_LIMIT));
-    scoreByTrack.set(id, entry);
-  }
-
-  return Array.from(scoreByTrack.entries())
-    .map(([id, scores]) => {
-      const hasText = typeof scores.text === "number";
-      const hasAudio = typeof scores.audio === "number";
-      if (hasText && hasAudio) {
-        return {
-          id,
-          score: (scores.text ?? 0) * TEXT_WEIGHT + (scores.audio ?? 0) * AUDIO_WEIGHT,
-          basis: "hybrid" as const,
-          modelVersion: `${TEXT_EMBEDDING_VERSION}+${AUDIO_EMBEDDING_VERSION}`,
-        };
-      }
-      if (hasAudio) {
-        return {
-          id,
-          score: scores.audio ?? 0,
-          basis: "audio" as const,
-          modelVersion: AUDIO_EMBEDDING_VERSION,
-        };
-      }
-      return {
-        id,
-        score: scores.text ?? 0,
-        basis: "text" as const,
-        modelVersion: TEXT_EMBEDDING_VERSION,
-      };
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, KNN_LIMIT);
+export function fallbackEnergy(bpm: number, durationSec: number): number {
+  const tempoDrive = clamp((bpm > 0 ? bpm : 120) / 180, 0, 1);
+  const durationFactor = clamp(1 - (durationSec > 0 ? durationSec : 210) / 600, 0, 1);
+  return clamp(0.26 + tempoDrive * 0.52 + durationFactor * 0.08, 0.18, 0.92);
 }
 
 export async function analyzeTrack(
@@ -153,76 +133,76 @@ export async function analyzeTrack(
   originalFilename: string
 ): Promise<void> {
   try {
-    // 1. Parse audio metadata
     const metadata = await parseFile(filepath);
-
     const durationSec = metadata.format.duration ?? 0;
-    const title =
-      metadata.common.title ?? originalFilename.replace(/\.[^.]+$/, "");
-    const artist = metadata.common.artist ?? "Unknown";
 
-    // 2. Extract / estimate features
-    const bpm = extractBpmHint(
-      metadata.native?.["ID3v2.3"]?.[0] ?? {},
-      originalFilename
-    );
-    const key = extractKeyHint(
-      metadata.native?.["ID3v2.3"]?.[0] ?? {},
-      originalFilename
-    );
-    const energy = computeEnergyProxy(bpm, durationSec, title);
+    let decodedAudio: Awaited<ReturnType<typeof decodeAudioFile>> | null = null;
+    let audioFeatures:
+      | ReturnType<typeof estimateAudioFeatures>
+      | null = null;
 
-    // 3. Update track analysis in Helix
-    await updateTrackAnalysis({
-      id: trackId,
-      duration_sec: durationSec,
-      bpm,
-      key,
-      energy,
-      status: "PROCESSING",
+    try {
+      decodedAudio = await decodeAudioFile(filepath);
+      audioFeatures = estimateAudioFeatures(decodedAudio);
+    } catch (decodeErr) {
+      console.warn(`Audio decode failed for ${trackId}; falling back to metadata-driven analysis`, decodeErr);
+    }
+
+    const bpmChoice = chooseBpm(extractBpmHint(metadata, originalFilename), {
+      value: audioFeatures?.bpm ?? 0,
+      confidence: audioFeatures?.bpm_confidence ?? 0,
+    });
+    const keyChoice = chooseKey(extractKeyHint(metadata, originalFilename), {
+      value: audioFeatures?.key ?? "",
+      confidence: audioFeatures?.key_confidence ?? 0,
     });
 
-    // 4. Generate real text embedding and store it
-    const metadataText = buildMetadataText(title, artist, key, bpm, energy);
-    const textEmbedding = await generateTextEmbedding(metadataText);
-    await addTrackEmbedding(trackId, textEmbedding);
-    const textNeighbors = await findNeighbors(textEmbedding, KNN_LIMIT);
+    const bpm = validBpm(bpmChoice.value);
+    const key = normalizeMusicalKey(keyChoice.value);
+    const energy = clamp(audioFeatures?.energy ?? fallbackEnergy(bpm, durationSec), 0, 1);
+    const fallbackTraits = buildFallbackAudioFeatures({
+      bpm,
+      energy,
+      durationSec,
+    });
 
-    let audioNeighbors: Array<{ id: string }> = [];
-    try {
-      const audioEmbedding = await generateAudioEmbedding(filepath);
-      await addAudioEmbedding(trackId, audioEmbedding);
-      audioNeighbors = await findAudioNeighbors(audioEmbedding, KNN_LIMIT);
-    } catch (audioErr) {
-      console.warn(`Audio embedding failed for ${trackId}; continuing with text-only similarity`, audioErr);
-    }
+    let embeddingVersion = "";
 
-    const merged = mergeNeighborScores(
-      trackId,
-      textNeighbors as Array<{ id: string }>,
-      audioNeighbors
-    );
-
-    for (const neighbor of merged) {
-      if (!neighbor.id) continue;
-      await addSimilarEdge({
-        from_id: trackId,
-        to_id: neighbor.id,
-        score: neighbor.score,
-        basis: neighbor.basis,
-        model_version: neighbor.modelVersion,
-      });
-    }
-
-    // 5. Mark as READY
-    await updateTrackAnalysis({
+    const baseAnalysis = {
       id: trackId,
       duration_sec: durationSec,
       bpm,
       key,
       energy,
+      brightness: clamp(audioFeatures?.brightness ?? fallbackTraits.brightness, 0, 1),
+      loudness: clamp(audioFeatures?.loudness ?? fallbackTraits.loudness, 0, 1),
+      complexity: clamp(audioFeatures?.complexity ?? fallbackTraits.complexity, 0, 1),
+      bpm_confidence: clamp(bpmChoice.confidence, 0, 1),
+      key_confidence: clamp(keyChoice.confidence, 0, 1),
+      analysis_version: ANALYSIS_VERSION,
+      embedding_version: embeddingVersion,
+      status: "PROCESSING",
+    } as const;
+
+    await updateTrackAnalysis(baseAnalysis);
+
+    if (decodedAudio) {
+      try {
+        const audioEmbedding = await generateAudioEmbeddingWithDetails(filepath, decodedAudio);
+        embeddingVersion = audioEmbedding.model_version;
+        await addAudioEmbedding(trackId, audioEmbedding.embedding);
+        await findAudioNeighbors(audioEmbedding.embedding, KNN_LIMIT);
+      } catch (audioErr) {
+        console.warn(`Audio embedding failed for ${trackId}; embedding-backed similarity skipped`, audioErr);
+      }
+    }
+
+    await updateTrackAnalysis({
+      ...baseAnalysis,
+      embedding_version: embeddingVersion,
       status: "READY",
     });
+    scheduleAtlasRefresh();
   } catch (err) {
     console.error(`Analysis failed for track ${trackId}:`, err);
     const message =

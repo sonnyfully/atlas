@@ -2,12 +2,12 @@ import { HelixDB } from "helix-ts";
 
 const HELIX_URL = process.env.HELIX_URL ?? "http://localhost:6969";
 
-async function testSearchV() {
+async function testAudioSearchV() {
     const client = new HelixDB(HELIX_URL);
 
     console.log("=== Testing SearchV Directly ===\n");
 
-    // 1. Create a test track with embedding
+    // 1. Create a test track with audio embedding
     const track = await client.query("AddTrack", {
         title: "Search Test Track",
         artist: "Test Artist",
@@ -22,8 +22,8 @@ async function testSearchV() {
     console.log(`Created track: ${trackId}`);
 
     // 2. Add embedding
-    const embedding1 = new Array(384).fill(0).map(() => Math.random());
-    const vecResult = await client.query("AddTrackEmbedding", {
+    const embedding1 = new Array(512).fill(0).map(() => Math.random());
+    const vecResult = await client.query("AddAudioEmbedding", {
         track_id: trackId,
         embedding: embedding1,
     });
@@ -31,12 +31,12 @@ async function testSearchV() {
 
     // 3. Try to search for neighbors using the SAME embedding
     console.log("Searching for neighbors with the same embedding...");
-    const neighbors = await client.query("FindNeighbors", {
+    const neighbors = await client.query("FindAudioNeighbors", {
         embedding: embedding1,
         k: 5,
     });
 
-    console.log("FindNeighbors result:", JSON.stringify(neighbors).substring(0, 500));
+    console.log("FindAudioNeighbors result:", JSON.stringify(neighbors).substring(0, 500));
     const neighborList = Array.isArray(neighbors) ? neighbors : [];
     console.log(`\nFound ${neighborList.length} neighbors`);
 
@@ -54,7 +54,7 @@ async function testSearchV() {
     }
 }
 
-testSearchV().catch((err) => {
+testAudioSearchV().catch((err) => {
     console.error("Test failed:", err);
     process.exit(1);
 });

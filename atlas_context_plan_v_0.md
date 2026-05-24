@@ -130,7 +130,7 @@ Beat‑synced or fixed window segments for finer retrieval.
 **Milestones**
 - Decide the MVP screens: Home, Track page, Scene page, Collision view.
 - Lock the Track DNA card format (what fields it shows).
-- Agree the demo story: “upload → DNA → scene → adjacent scenes → collision pairs.”
+- Agree the presentation story: “upload → DNA → scene → adjacent scenes → collision pairs.”
 
 ## Phase 1 — MVP: Track DNA + “sounds like this”
 **Milestones**
@@ -155,7 +155,7 @@ Beat‑synced or fixed window segments for finer retrieval.
 ## Phase 4 — Polish + submission package
 **Milestones**
 - Shareable DNA card export (image or link).
-- A clean README + demo script.
+- A clean README + presentation runbook.
 - Two short pitch writeups: one for HelixDB (graph+vector showcase), one for SoundCloud (new discovery surface).
 
 ## Nice-to-haves (later)
@@ -163,4 +163,3 @@ Beat‑synced or fixed window segments for finer retrieval.
 - Time-stamped comment intelligence
 - “Set path” generator between scenes
 - User accounts + saved crates
-
